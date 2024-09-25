@@ -25,7 +25,7 @@ jobs:
       - name: Compile the program
         run: make
 
-      # Run the shell program
+      # Run the shell
       - name: Run the shell
         run: |
           echo "exit" | ./simple_shell
