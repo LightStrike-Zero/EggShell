@@ -11,6 +11,10 @@
  * @date 25/09/2024
  */
 
+/* Our includes */
+#include "token.h"
+
+/* System includes */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,13 +41,13 @@ void read_command(char *command) {
 
 void execute_command(char *command) {
     char *args[MAX_ARGS];
-    int i = 0;
+    int num_tokens;
 
-    // simple tokenise
-    args[i] = strtok(command, " ");
-    while (args[i] != NULL) {
-        i++;
-        args[i] = strtok(NULL, " ");
+    // tokenise
+    num_tokens = tokenise(command, args);
+    if (num_tokens < 0) {
+        fprintf(stderr, "Error: Too many tokens\n");
+        return;
     }
 
     if (strcmp(args[0], "exit") == 0) {
@@ -63,16 +67,7 @@ void execute_command(char *command) {
             exit(1);
         }
     } else {
-        int status;
-        pid_t wpid;
-
-        do {
-            wpid = waitpid(-1, &status, WNOHANG);
-            if (wpid == -1) {
-                perror("waitpid");
-                exit(1);
-            }
-        } while (wpid > 0);
+        wait(NULL);
     }
 }
 
