@@ -56,7 +56,7 @@ void execute_command(char *command) {
         printf("Exiting shell...\n");
         exit(0);
     }
-    
+
 // to change hostname (sets PS1, which in bash is the hostname of the terminal)
     if (strcmp(args[0], "hostname") == 0) {
         if (num_tokens > 1) {
@@ -85,7 +85,7 @@ void execute_command(char *command) {
 
 
 
-int main() {
+int main() 
     char command[MAX_COMMAND_LENGTH];
 
     while (1) {
