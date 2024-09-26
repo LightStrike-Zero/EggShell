@@ -85,7 +85,7 @@ void execute_command(char *command) {
 
 
 
-int main() 
+int main() {
     char command[MAX_COMMAND_LENGTH];
 
     while (1) {
