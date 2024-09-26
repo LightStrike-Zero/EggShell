@@ -25,8 +25,10 @@
 #define MAX_COMMAND_LENGTH 1024
 #define MAX_ARGS 100
 
+char PS1[MAX_COMMAND_LENGTH] = "[374-shell] $ ";
+
 void read_command(char *command) {
-    printf("374 shell> ");
+    printf("%s", PS1);
     fflush(stdout);  
     if (fgets(command, MAX_COMMAND_LENGTH, stdin) == NULL) {
         perror("fgets");
@@ -54,7 +56,17 @@ void execute_command(char *command) {
         printf("Exiting shell...\n");
         exit(0);
     }
-
+    
+// to change hostname (sets PS1, which in bash is the hostname of the terminal)
+    if (strcmp(args[0], "hostname") == 0) {
+        if (num_tokens > 1) {
+            snprintf(PS1, sizeof(PS1), "%s > ", args[1]); // Update PS1
+            printf("Prompt changed to: %s\n", PS1);
+        } else {
+            printf("Usage: hostname <new_prompt>\n");
+        }
+        return;
+    }
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
@@ -70,6 +82,8 @@ void execute_command(char *command) {
         wait(NULL);
     }
 }
+
+
 
 int main() {
     char command[MAX_COMMAND_LENGTH];
