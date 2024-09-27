@@ -1,0 +1,51 @@
+# Ignore object and binary files
+*.o
+*.out
+*.a
+*.so
+*.exe
+
+# Ignore executables and intermediate build files
+a.out
+a.exe
+*.elf
+*.map
+
+# Ignore compiled dynamic libraries
+*.dylib
+*.dll
+
+# Ignore debug files
+*.dSYM/
+*.d/
+*.log
+
+# Ignore temporary files
+*.tmp
+*.swp
+*.swo
+*.bak
+
+# Ignore core dumps
+core
+core.*
+
+# Ignore editor backups
+*~ 
+*.orig
+*.rej
+
+# Ignore generated documentation files
+*.pdf
+*.html
+
+
+# Ignore IDE specific files
+.vscode/
+.idea/
+*.iml
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini

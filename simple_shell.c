@@ -13,6 +13,7 @@
 
 /* Our includes */
 #include "token.h"
+#include "history.h"
 
 /* System includes */
 #include <stdio.h>
@@ -24,6 +25,8 @@
 
 #define MAX_COMMAND_LENGTH 1024
 #define MAX_ARGS 100
+
+
 
 // original command line prompt is set
 // var name PS1 to mimic og Unix shell 
@@ -38,16 +41,47 @@ Node *cwd; // will be replaced with custom made cwd command.
 Node *root; // root node!
 
 void read_command(char *command) {
+    struct termios orig_termios;
+    enable_raw_mode(&orig_termios);
+
+    int index = 0;
     printf("%s", PS1);
-    fflush(stdout);  
-    if (fgets(command, MAX_COMMAND_LENGTH, stdin) == NULL) {
-        perror("fgets");
-        exit(1);
+    fflush(stdout);
+
+    while (1) {
+        char c = '\0';
+        if (read(STDIN_FILENO, &c, 1) == -1) break;
+
+        if (c == '\n') {
+            command[index] = '\0'; // Null-terminate the command
+            printf("\n");
+            break;
+        } else if (c == 127) { // Backspace
+            if (index > 0) {
+                index--;
+                printf("\b \b"); // Erase the last character
+            }
+        } else if (c == '\033') { // Arrow keys start with an escape sequence
+            handle_arrow_keys(command, PS1);
+            index = strlen(command); // Update index to match the current command length
+        } else {
+            // Add character to command buffer
+            if (index < MAX_COMMAND_LENGTH - 1) {
+                command[index] = c;
+                index++;
+                write(STDOUT_FILENO, &c, 1); // Echo the character
+            }
+        }
     }
 
-    size_t len = strlen(command);
-    if (len > 0 && command[len - 1] == '\n') {
-        command[len - 1] = '\0';
+    disable_raw_mode(&orig_termios);
+
+    // Add command to history if it's not empty
+    if (strlen(command) > 0) {
+        // Add the command to history
+        strcpy(history[history_count % HISTORY_SIZE], command);
+        history_count++;
+        history_index = history_count; // Reset history index to the end
     }
 }
 
@@ -68,19 +102,37 @@ void execute_command(char *command) {
     char *args[MAX_ARGS];
     int num_tokens;
 
-    // tokenise
+    // Check for the history command
+    if (strcmp(command, "history") == 0) {
+        show_history();
+        return;
+    }
+
+    // Check for !<number> to repeat a command by number
+    if (command[0] == '!' && isdigit(command[1])) {
+        int command_number = atoi(&command[1]);
+        repeat_command_by_number(command_number, command);
+    }
+
+    // Check for !<string> to repeat a command by string
+    else if (command[0] == '!' && isalpha(command[1])) {
+        repeat_command_by_string(&command[1], command);
+    }
+
+    // Tokenize the command
     num_tokens = tokenise(command, args);
     if (num_tokens < 0) {
         fprintf(stderr, "Error: Too many tokens\n");
         return;
     }
 
+    // Handle exit command
     if (strcmp(args[0], "exit") == 0) {
         printf("Exiting shell...\n");
         exit(0);
     }
 
-// to change hostname (sets PS1, which in bash is the hostname of the terminal)
+    // Change hostname
     if (strcmp(args[0], "hostname") == 0) {
         if (num_tokens > 1) {
             snprintf(PS1, sizeof(PS1), "%s > ", args[1]); // Update PS1
@@ -91,7 +143,8 @@ void execute_command(char *command) {
         return;
     }
 
-      if (strcmp(args[0], "pwd") == 0) {
+    // Handle pwd command
+    if (strcmp(args[0], "pwd") == 0) {
         pwd();
         return;
     }
@@ -111,7 +164,11 @@ void execute_command(char *command) {
         wait(NULL);
     }
 
-
+    // Add the command to history if it's not a history-related command
+    if (history_count < HISTORY_SIZE) {
+        strcpy(history[history_count], command);
+        history_count++;
+    }
 }
 
 
