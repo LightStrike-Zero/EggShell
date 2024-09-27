@@ -25,7 +25,17 @@
 #define MAX_COMMAND_LENGTH 1024
 #define MAX_ARGS 100
 
-char PS1[MAX_COMMAND_LENGTH] = "[374-shell] $ ";
+// original command line prompt is set
+// var name PS1 to mimic og Unix shell 
+char PS1[MAX_COMMAND_LENGTH] = "[374-shell] $ "; 
+
+typedef struct Node { // typedef Node - each Node has a parent (unless root), and name
+    struct Node *parent;
+    char name[100]; // arbitrary number.. idk
+} Node; 
+
+Node *cwd; // will be replaced with custom made cwd command. 
+Node *root; // root node!
 
 void read_command(char *command) {
     printf("%s", PS1);
@@ -39,6 +49,19 @@ void read_command(char *command) {
     if (len > 0 && command[len - 1] == '\n') {
         command[len - 1] = '\0';
     }
+}
+
+void pwd_recurse(Node *nodePtr) {
+    if (nodePtr == root) {
+        return;
+    }
+    pwd_recurse(nodePtr->parent);
+    printf("/%s", nodePtr->name); // will unravel path from cwd -> root, printing from root -> cwd!
+}
+
+void pwd() {
+    pwd_recurse(cwd); // recursive function, starts from cwd, cwd' parent, etc, etc.
+    printf("\n");
 }
 
 void execute_command(char *command) {
@@ -67,6 +90,12 @@ void execute_command(char *command) {
         }
         return;
     }
+
+      if (strcmp(args[0], "pwd") == 0) {
+        pwd();
+        return;
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
@@ -81,12 +110,23 @@ void execute_command(char *command) {
     } else {
         wait(NULL);
     }
+
+
 }
 
 
 
 int main() {
     char command[MAX_COMMAND_LENGTH];
+
+    root = malloc(sizeof(Node));
+    strcpy(root->name, ""); // root has no name. 
+    root->parent = NULL; 
+    // root set, with name and parent ("" and NULL).
+
+    cwd = malloc(sizeof(Node));
+    strcpy(cwd->name, "home");
+    cwd->parent = root;
 
     while (1) {
         // user input
