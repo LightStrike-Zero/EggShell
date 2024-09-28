@@ -5,24 +5,20 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-
-void trim_whitespace(char *str) {
+void trim_whitespace(char *str)
+{
     char *end;
+    while (isspace((unsigned char)*str))
+        str++;
 
-    // Trim leading space
-    while (isspace((unsigned char)*str)) str++;
-
-    if (*str == 0) {
-        // All spaces
+    if (*str == 0)
+    {
         *str = '\0';
         return;
     }
-
-    // Trim trailing space
     end = str + strlen(str) - 1;
-    while (end > str && isspace((unsigned char)*end)) end--;
-
-    // Write new null terminator
+    while (end > str && isspace((unsigned char)*end))
+        end--;
     *(end + 1) = '\0';
 }
 
@@ -71,7 +67,7 @@ int tokenise(char line[], char *token[])
         if (strchr(newToken, '*') || strchr(newToken, '?'))
         {
             int expanded = expand_wildcard(newToken, &token[i], MAX_TOKENS - i);
-            
+
             // If no wildcard expansion was found, treat the token as-is
             if (expanded == 0)
             {

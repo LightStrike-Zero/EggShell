@@ -18,6 +18,7 @@ token.o: token.c token.h
 history.o: history.c history.h
 	$(CC) $(CFLAGS) -c history.c
 
+
 clean:
 	rm -f $(TARGET) *.o
 
