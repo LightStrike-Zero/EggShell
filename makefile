@@ -9,7 +9,7 @@ all: $(TARGET)
 $(TARGET): simple_shell.o token.o history.o
 	$(CC) $(CFLAGS) -o $(TARGET) simple_shell.o token.o history.o
 
-simple_shell.o: simple_shell.c token.h history.h
+simple_shell.o: simple_shell.c simple_shell.h token.h history.h
 	$(CC) $(CFLAGS) -c simple_shell.c
 
 token.o: token.c token.h
