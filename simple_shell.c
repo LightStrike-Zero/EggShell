@@ -26,111 +26,91 @@
 #include <ctype.h>
 #include <errno.h>
 
-
-
-
-void read_command(char *command) {
-    struct termios raw_terminal_input_mode;
-    tcgetattr(STDIN_FILENO, &original_terminal_input); // Get current terminal attributes
-    raw_terminal_input_mode = original_terminal_input; // copy attribs to raw term mode
-
-    // set raw mode
-    raw_terminal_input_mode.c_lflag &= ~(ECHO | ICANON); // Turn off echo and canonical mode
-    raw_terminal_input_mode.c_cc[VMIN] = 1;  // Minimum number of characters to read
-    raw_terminal_input_mode.c_cc[VTIME] = 0; // No timeout
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_terminal_input_mode); // set active terminal mode
+void read_command(char *command)
+{
+    // put the terminalin non-canonical mode to gain raw control
+    make_raw_terminal();
 
     int index = 0;
-    int history_pos = history_count; // Start at the end of history
-    char current_command[MAX_COMMAND_LENGTH] = {0}; // To store current command when navigating history
-
     printf("%s", PS1);
     fflush(stdout);
 
-    while (1) {
-        char c;
-        ssize_t nread = read(STDIN_FILENO, &c, 1);
+    while (1)
+    {
+        char character;
+        ssize_t nread = read(STDIN_FILENO, &character, 1);
 
-        if (nread == -1 && errno != EAGAIN) {
+        if (nread == -1 && errno != EAGAIN)
+        {
             perror("read");
             break;
-        } else if (nread == 0) {
+        }
+        else if (nread == 0)
+        {
             // EOF (Ctrl+D)
             printf("\n");
+            restore_terminal();
             exit(0);
         }
 
-        if (c == '\n') {
-            command[index] = '\0'; // Null-terminate the command
+        if (character == '\n')
+        {
+            command[index] = '\0';
             printf("\n");
             break;
-        } else if (c == BACKSPACE || c == 8) {
-            if (index > 0) {
+        }
+        else if (character == BACKSPACE || character == 8)
+        {
+            if (index > 0)
+            {
                 index--;
                 command[index] = '\0';
-                // Move cursor back, overwrite the character with space, move cursor back again
                 printf("\b \b");
                 fflush(stdout);
             }
-        } else if (c == ESCAPE) {
-            // Escape sequence for special keys
-            char seq[3];
-            if (read(STDIN_FILENO, &seq[0], 1) == 0) break;
-            if (read(STDIN_FILENO, &seq[1], 1) == 0) break;
-
-            if (seq[0] == '[') {
-                if (seq[1] == 'A') {
-                    // Up arrow
-                    if (history_count == 0) continue; // No history
-                    if (history_pos > 0) history_pos--;
-                    strcpy(current_command, history[history_pos % HISTORY_SIZE]);
-                    // Clear current line
-                    printf("\r\33[2K"); // Carriage return and clear line
-                    printf("%s%s", PS1, current_command);
-                    fflush(stdout);
-                    strcpy(command, current_command);
-                    index = strlen(command);
-                } else if (seq[1] == 'B') {
-                    // Down arrow
-                    if (history_count == 0) continue; // No history
-                    if (history_pos < history_count) history_pos++;
-                    if (history_pos == history_count) {
-                        // Clear command
-                        current_command[0] = '\0';
-                    } else {
-                        strcpy(current_command, history[history_pos % HISTORY_SIZE]);
-                    }
-                    // Clear current line
-                    printf("\r\33[2K");
-                    printf("%s%s", PS1, current_command);
-                    fflush(stdout);
-                    strcpy(command, current_command);
-                    index = strlen(command);
-                }
-                // Ignore other sequences
-            }
-        } else if (isprint(c)) {
-            if (index < MAX_COMMAND_LENGTH - 1) {
-                command[index++] = c;
+        }
+        else if (character == ESCAPE)
+        {
+            handle_history_navigation(command, &index, PS1);
+        }
+        else if (isprint(character))
+        {
+            if (index < MAX_COMMAND_LENGTH - 1)
+            {
+                command[index++] = character;
                 command[index] = '\0';
-                printf("%c", c);
+                printf("%c", character);
                 fflush(stdout);
             }
         }
     }
 
+    // tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_terminal_input);
     // Restore original terminal settings
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_terminal_input);
+    restore_terminal();
 
     // Add command to history if it's not empty
-    if (strlen(command) > 0) {
-        strcpy(history[history_count % HISTORY_SIZE], command);
-        history_count++;
-        history_index = history_count; // Reset history index to the end
+    if (strlen(command) > 0)
+    {
+        add_to_history(command);
     }
 }
 
-void restore_terminal() {
+void make_raw_terminal()
+{
+    struct termios raw_terminal_input_mode;
+    tcgetattr(STDIN_FILENO, &original_terminal_input);
+    raw_terminal_input_mode = original_terminal_input;
+
+    // Set raw mode
+    raw_terminal_input_mode.c_lflag &= ~(ECHO | ICANON);
+    raw_terminal_input_mode.c_cc[VMIN] = 1;
+    raw_terminal_input_mode.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_terminal_input_mode);
+}
+
+void restore_terminal()
+{
     tcsetattr(STDIN_FILENO, TCSANOW, &original_terminal_input);
 }
 
@@ -150,34 +130,55 @@ void pwd()
     printf("\n");
 }
 
+void execute_command(char *command, int is_background)
+{
 
-void execute_command(char *command, int is_background) {
+    // Handle empty command first to easy out
+    if (strlen(command) == 0)
+    {
+        return;
+    }
+    // Check for repeat command by number (!n)
+    if (command[0] == '!' && isdigit(command[1]))
+    {
+        int command_number = atoi(&command[1]);
+        repeat_command_by_number(command_number, command);
+        if (strlen(command) == 0)
+            return; // No valid command found
+    }
+    // Check for repeat command by string (!string)
+    else if (command[0] == '!' && isalpha(command[1]))
+    {
+        repeat_command_by_string(&command[1], command);
+        if (strlen(command) == 0)
+            return; // No valid command found
+    }
+
     char *args[MAX_ARGS];
     int num_tokens;
 
-    // Handle empty commands
-    if (strlen(command) == 0) {
-        return;
-    }
-
     // Tokenize the command
     num_tokens = tokenise(command, args);
-    if (num_tokens < 0) {
+    if (num_tokens < 0)
+    {
         fprintf(stderr, "Error: Too many tokens\n");
         return;
     }
 
     // Handle built-in commands before forking
-    if (strcmp(args[0], "exit") == 0) {
+    if (strcmp(args[0], "exit") == 0)
+    {
         restore_terminal();
         printf("Exiting shell...\n");
         exit(0);
     }
-    else if (strcmp(args[0], "history") == 0) {
+    else if (strcmp(args[0], "history") == 0)
+    {
         show_history();
         return;
     }
-    else if (strcmp(args[0], "pwd") == 0) {
+    else if (strcmp(args[0], "pwd") == 0)
+    {
         pwd();
         return;
     }
@@ -185,31 +186,40 @@ void execute_command(char *command, int is_background) {
 
     // Fork and execute external commands
     pid_t pid = fork();
-    if (pid < 0) {
+    if (pid < 0)
+    {
         perror("fork");
         return;
     }
-    if (pid == 0) {
+    if (pid == 0)
+    {
         // Child process
-        if (is_background) {
+        if (is_background)
+        {
             setpgid(0, 0); // Detach from the controlling terminal
         }
-        if (execvp(args[0], args) < 0) {
+        if (execvp(args[0], args) < 0)
+        {
             perror("execvp");
             exit(1);
         }
     }
-    else {
+    else
+    {
         // Parent process
-        if (!is_background) {
+        if (!is_background)
+        {
             waitpid(pid, NULL, 0);
-        } else {
+        }
+        else
+        {
             printf("[Background PID: %d]\n", pid);
         }
     }
 }
 
-void parse_commands(char *input_command) {
+void parse_commands(char *input_command)
+{
     char *commands[MAX_ARGS];
     char separators[MAX_ARGS];
     int num_commands = 0;
@@ -220,15 +230,19 @@ void parse_commands(char *input_command) {
     temp_input[MAX_COMMAND_LENGTH - 1] = '\0';
 
     char *cmd = temp_input;
-    while (cmd != NULL && num_commands < MAX_ARGS) {
+    while (cmd != NULL && num_commands < MAX_ARGS)
+    {
         // Find next occurrence of ';' or '&'
         char *sep = strpbrk(cmd, ";&");
-        if (sep != NULL) {
+        if (sep != NULL)
+        {
             separators[num_commands] = *sep;
             *sep = '\0';
             commands[num_commands++] = cmd;
             cmd = sep + 1;
-        } else {
+        }
+        else
+        {
             // Last command without a following separator
             commands[num_commands++] = cmd;
             separators[num_commands - 1] = '\0';
@@ -236,25 +250,31 @@ void parse_commands(char *input_command) {
         }
     }
 
-    for (int i = 0; i < num_commands; i++) {
+    for (int i = 0; i < num_commands; i++)
+    {
         char *command = commands[i];
         trim_whitespace(command);
 
-        if (strlen(command) == 0) {
+        if (strlen(command) == 0)
+        {
             continue;
         }
 
         // Determine if the command should run in the background
         int is_background = 0;
-        if (separators[i] == '&') {
+        if (separators[i] == '&')
+        {
             is_background = 1;
-        } else if (separators[i] == ';' || separators[i] == '\0') {
+        }
+        else if (separators[i] == ';' || separators[i] == '\0')
+        {
             is_background = 0;
         }
 
         // Check if the command ends with '&'
         size_t len = strlen(command);
-        if (separators[i] == '\0' && len > 0 && command[len - 1] == '&') {
+        if (separators[i] == '\0' && len > 0 && command[len - 1] == '&')
+        {
             is_background = 1;
             command[len - 1] = '\0';
             trim_whitespace(command);
@@ -265,14 +285,16 @@ void parse_commands(char *input_command) {
     }
 }
 
-void setup_signal_handlers() {
-    struct sigaction sa_int, sa_chld;
+void setup_signal_handlers()
+{
+    struct sigaction sa_int, sa_chld, sa_quit;
 
     // Setup for SIGINT
     sa_int.sa_handler = &handle_sigint;
     sigemptyset(&sa_int.sa_mask);
     sa_int.sa_flags = SA_RESTART;
-    if (sigaction(SIGINT, &sa_int, NULL) == -1) {
+    if (sigaction(SIGINT, &sa_int, NULL) == -1)
+    {
         perror("sigaction SIGINT");
         exit(1);
     }
@@ -281,8 +303,19 @@ void setup_signal_handlers() {
     sa_chld.sa_handler = &handle_sigchld;
     sigemptyset(&sa_chld.sa_mask);
     sa_chld.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    if (sigaction(SIGCHLD, &sa_chld, NULL) == -1) {
+    if (sigaction(SIGCHLD, &sa_chld, NULL) == -1)
+    {
         perror("sigaction SIGCHLD");
+        exit(1);
+    }
+
+    // Setup for SIGQUIT
+    sa_quit.sa_handler = &handle_sigquit;
+    sigemptyset(&sa_quit.sa_mask);
+    sa_quit.sa_flags = SA_RESTART;
+    if (sigaction(SIGQUIT, &sa_quit, NULL) == -1)
+    {
+        perror("sigaction SIGQUIT");
         exit(1);
     }
 }
@@ -296,12 +329,31 @@ void handle_sigchld(int sig)
     }
 }
 
-void handle_sigint(int sig) {
+void handle_sigint(int sig)
+{
     restore_terminal();
-    printf("\n");     
-    exit(0);          
+    printf("\n");
+    exit(0);
 }
 
+void handle_sigquit(int sig)
+{
+    restore_terminal(); // Restore original terminal settings
+
+    // Reset SIGQUIT to its default action so that it generates a core dump incase this was cause by an error
+    struct sigaction sa;
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGQUIT, &sa, NULL) == -1)
+    {
+        perror("sigaction");
+        exit(1);
+    }
+
+    // Re-raise SIGQUIT to trigger the default behavior (core dump)
+    raise(SIGQUIT);
+}
 
 int main()
 {
@@ -319,15 +371,21 @@ int main()
     // Set up signal handlers
     setup_signal_handlers();
 
-    while (1) {
+    while (1)
+    {
         // Read user input
         read_command(command);
 
         // Execute commands
-        if (strlen(command) > 0) {
+        if (strlen(command) > 0)
+        {
             parse_commands(command);
         }
     }
+
+    // unreachable in current code, but good practice?
+    free(cwd);
+    free(root);
 
     return 0;
 }

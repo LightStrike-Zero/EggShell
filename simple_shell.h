@@ -22,6 +22,7 @@ struct termios original_terminal_input; // global for defualt terminal attribute
 
 
 void read_command(char *command);
+void make_raw_terminal();
 void restore_terminal();
 void pwd_recurse(Node *nodePtr);
 void pwd();
@@ -30,3 +31,4 @@ void parse_commands(char *input_command);
 void setup_signal_handlers();
 void handle_sigchld(int sig);
 void handle_sigint(int sig);
+void handle_sigquit(int sig);

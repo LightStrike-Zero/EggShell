@@ -11,10 +11,10 @@ extern int history_count;
 extern int history_index;
 
 void show_history();
+void add_to_history(const char *command);
+void handle_history_navigation(char *command, int *index, const char *PS1);
 void repeat_command_by_number(int command_number, char *command);
 void repeat_command_by_string(char *prefix, char *command);
-void enable_raw_mode(struct termios *orig_termios);
-void disable_raw_mode(struct termios *orig_termios);
-void handle_arrow_keys(char *command, const char *PS1);
+
 
 #endif
