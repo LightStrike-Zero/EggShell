@@ -8,19 +8,6 @@ char history[HISTORY_SIZE][MAX_COMMAND_LENGTH];
 int history_count = 0;
 int history_index = -1; // Tracks the current position in the history when scrolling
 
-struct termios original_termios;
-
-void enable_raw_mode() {
-    struct termios raw;
-    tcgetattr(STDIN_FILENO, &original_termios);
-    raw = original_termios;
-    raw.c_lflag &= ~(ECHO | ICANON);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-}
-
-void disable_raw_mode() {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
-} 
 void show_history() {
     for (int i = 0; i < history_count && i < HISTORY_SIZE; i++) {
         printf("%d %s\n", i + 1, history[i]);
@@ -35,38 +22,36 @@ void add_to_history(const char *command) {
 
 void handle_history_navigation(char *command, int *index, const char *PS1) {
     char seq[3];
-    
     if (read(STDIN_FILENO, &seq[0], 1) == 0) return;
-    
-    if (seq[0] == '\033') { // Escape sequence starts with \033
-        if (read(STDIN_FILENO, &seq[1], 1) == 0) return;
-        if (read(STDIN_FILENO, &seq[2], 1) == 0) return;
+    if (read(STDIN_FILENO, &seq[1], 1) == 0) return;
 
-        if (seq[1] == '[') {
-            if (seq[2] == 'A') {
-                // Up arrow
-                if (history_count == 0) return; // No history
-                if (history_index > 0) history_index--;
-                else history_index = 0;
-                strcpy(command, history[history_index % HISTORY_SIZE]);
-            } else if (seq[2] == 'B') {
-                // Down arrow
-                if (history_count == 0) return; // No history
-                if (history_index < history_count - 1) history_index++;
-                else {
-                    history_index = history_count;
-                    command[0] = '\0';
-                }
+    if (seq[0] == '[') {
+        if (seq[1] == 'A') {
+            // Up arrow
+            if (history_count == 0) return; // No history
+            if (history_index > 0) history_index--;
+            else history_index = 0;
+            strcpy(command, history[history_index % HISTORY_SIZE]);
+        } else if (seq[1] == 'B') {
+            // Down arrow
+            if (history_count == 0) return; // No history
+            if (history_index < history_count - 1) history_index++;
+            else {
+                // At the end of history
+                history_index = history_count;
+                command[0] = '\0';
             }
-            // Clear the current line and display the command
-            printf("\r\33[2K");
-            printf("%s%s", PS1, command);
-            fflush(stdout);
-            *index = strlen(command);
+        } else {
+            return; // Ignore other sequences
         }
+
+        // Clear current line and display the command
+        printf("\r\33[2K");
+        printf("%s%s", PS1, command);
+        fflush(stdout);
+        *index = strlen(command);
     }
 }
-
 
 void repeat_command_by_number(int command_number, char *command) {
     if (command_number > 0 && command_number <= history_count) {
