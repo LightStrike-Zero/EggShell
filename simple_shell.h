@@ -5,6 +5,10 @@
 #define CTRL_D 4
 #define ESCAPE 27
 
+
+#define END_PINK   "\033[0m"
+#define PINK    "\033[1;35m"
+
 // original command line prompt is set
 // var name PS1 to mimic og Unix shell
 char PS1[MAX_COMMAND_LENGTH] = "[374-shell] $ ";

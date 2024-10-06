@@ -120,9 +120,9 @@ void man()
     printf("This is Eggshell's user manual.\n"
            "Available commands:\n"
            "Usage: <hostname> $ <command>\n"
-           "pwd -     Prints the working directory.\n"
+          PINK "pwd -     Prints the working directory.\n"
            "history - Use up and down arrow keys to toggle through command history.\n"
-           "exit -    Exit shell. Bye Bye.\n");
+           "exit -    Exit shell. Bye Bye.\n") END_PINK;
 }
 
 void pwd_recurse(Node *nodePtr)
