@@ -15,6 +15,7 @@
 #include "simple_shell.h"
 #include "token.h"
 #include "history.h"
+#include "formatting.h"
 
 /* System includes */
 #include <stdio.h>
@@ -358,6 +359,7 @@ void handle_sigquit(int sig)
 int main()
 {
     char command[MAX_COMMAND_LENGTH];
+    int rows, cols; // for terminal size. 
 
     root = malloc(sizeof(Node));
     strcpy(root->name, ""); // root has no name.
@@ -371,6 +373,11 @@ int main()
     // Set up signal handlers
     setup_signal_handlers();
 
+    get_terminal_size(&rows, &cols);
+
+    // Display the welcome message
+    welcome_message(cols);
+
     while (1)
     {
         // Read user input
@@ -383,7 +390,7 @@ int main()
         }
     }
 
-    // unreachable in current code, but good practice?
+    // unreachable in current code, but good practice.
     free(cwd);
     free(root);
 
