@@ -115,6 +115,15 @@ void restore_terminal()
     tcsetattr(STDIN_FILENO, TCSANOW, &original_terminal_input);
 }
 
+void man()
+{
+    "This is Eggshell's user manual.\n"
+    "Available commands: \n"
+    "Usage: <hostname> $ <command>\n"
+    "pwd-     Prints the working directory.\n"
+    "history- Use up and down arrow keys to toggle through command history.\n"
+    "exit-    Exit shell. Bye Bye.\n"
+}
 void pwd_recurse(Node *nodePtr)
 {
     if (nodePtr == root)
@@ -181,6 +190,12 @@ void execute_command(char *command, int is_background)
     else if (strcmp(args[0], "pwd") == 0)
     {
         pwd();
+        return;
+    }
+
+    else if (strcmp(args[0], "man") == 0)
+    {
+        man();
         return;
     }
     // Add other built-in commands here...

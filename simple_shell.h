@@ -26,6 +26,7 @@ void make_raw_terminal();
 void restore_terminal();
 void pwd_recurse(Node *nodePtr);
 void pwd();
+void man();
 void execute_command(char *command, int is_background);
 void parse_commands(char *input_command);
 void setup_signal_handlers();
