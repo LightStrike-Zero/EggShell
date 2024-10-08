@@ -142,6 +142,10 @@ void pwd()
     printf("\n");
 }
 
+void cd()
+{
+    printf("/%s", nodePtr->name);
+}
 void execute_command(char *command, int is_background)
 {
 
@@ -203,7 +207,9 @@ void execute_command(char *command, int is_background)
 
     else if (strcmp(args[0], "cd") == 0)
     {
-        printf("/%s", nodePtr->name);
+        cd();
+        return;
+        
     }
     // Add other built-in commands here...
 
@@ -382,7 +388,6 @@ int main()
 {
     char command[MAX_COMMAND_LENGTH];
     int rows, cols; // for terminal size. 
-    Node homeDir;
 
     root = malloc(sizeof(Node));
     strcpy(root->name, ""); // root has no name.
