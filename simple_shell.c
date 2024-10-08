@@ -122,6 +122,7 @@ void man()
            "Usage: <hostname> $ <command>\n"
           PINK "pwd -     Prints the working directory.\n"
            "history - Use up and down arrow keys to toggle through command history.\n"
+           "cd - Print the current directory."
            "exit -    Exit shell. Bye Bye.\n"END_PINK); 
 }
 
@@ -198,6 +199,11 @@ void execute_command(char *command, int is_background)
     {
         man();
         return;
+    }
+
+    else if (strcmp(args[0], 'cd') == 0)
+    {
+        printf("/%s", nodePtr->name);
     }
     // Add other built-in commands here...
 
@@ -382,9 +388,9 @@ int main()
     root->parent = NULL;
     // root set, with name and parent ("" and NULL).
 
-    cwd = malloc(sizeof(Node));
-    strcpy(cwd->name, "home");
-    cwd->parent = root;
+    homeDir = malloc(sizeof(Node));
+    strcpy(homeDir->name, "home");
+    homeDir->parent = root;
 
     // Set up signal handlers
     setup_signal_handlers();
