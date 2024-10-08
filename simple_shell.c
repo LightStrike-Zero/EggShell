@@ -201,7 +201,7 @@ void execute_command(char *command, int is_background)
         return;
     }
 
-    else if (strcmp(args[0], 'cd') == 0)
+    else if (strcmp(args[0], "cd") == 0)
     {
         printf("/%s", nodePtr->name);
     }
