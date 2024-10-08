@@ -382,6 +382,7 @@ int main()
 {
     char command[MAX_COMMAND_LENGTH];
     int rows, cols; // for terminal size. 
+    Node homeDir;
 
     root = malloc(sizeof(Node));
     strcpy(root->name, ""); // root has no name.
