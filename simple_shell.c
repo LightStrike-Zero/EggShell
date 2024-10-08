@@ -122,7 +122,6 @@ void man()
            "Usage: <hostname> $ <command>\n"
           PINK "pwd -     Prints the working directory.\n"
            "history - Use up and down arrow keys to toggle through command history.\n"
-           "cd - Print the current directory."
            "exit -    Exit shell. Bye Bye.\n"END_PINK); 
 }
 
@@ -138,14 +137,10 @@ void pwd_recurse(Node *nodePtr)
 
 void pwd()
 {
-    pwd_recurse(cwd); // recursive function, starts from cwd, cwd' parent, etc, etc.
+    pwd_recurse(cwd); // recursive function, starts from home, cwd' parent, etc, etc.
     printf("\n");
 }
 
-void cd()
-{
-    printf("/%s", nodePtr->name);
-}
 void execute_command(char *command, int is_background)
 {
 
@@ -205,12 +200,7 @@ void execute_command(char *command, int is_background)
         return;
     }
 
-    else if (strcmp(args[0], "cd") == 0)
-    {
-        cd();
-        return;
-        
-    }
+
     // Add other built-in commands here...
 
     // Fork and execute external commands
@@ -394,9 +384,9 @@ int main()
     root->parent = NULL;
     // root set, with name and parent ("" and NULL).
 
-    homeDir = malloc(sizeof(Node));
-    strcpy(homeDir->name, "home");
-    homeDir->parent = root;
+    cwd = malloc(sizeof(Node));
+    strcpy(cwd->name, "home");
+    cwd->parent = root;
 
     // Set up signal handlers
     setup_signal_handlers();
