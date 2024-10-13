@@ -141,6 +141,40 @@ void pwd()
     printf("\n");
 }
 
+void change_hostname()
+{
+    char new_hostname[MAX_COMMAND_LENGTH]; // buffer for the new hostname
+    printf("Enter new hostname: ");
+    
+    if (fgets(new_hostname, sizeof(new_hostname), stdin) != NULL)
+    {
+        // Remove the newline character, if present
+        int len = strlen(new_hostname);
+        if (len > 0 && new_hostname[len - 1] == '\n') {
+            new_hostname[len - 1] = '\0';
+        }
+
+
+
+        if (strlen(new_hostname) > 0 && strlen(new_hostname) < MAX_COMMAND_LENGTH)
+        {
+            snprintf(PS1, sizeof(PS1), "[%s] $", new_hostname);
+            printf("Hostname has been changed.\n");
+        }
+        else
+        {
+            printf("Invalid hostname.\n");
+        }
+    }
+    else
+    {
+        perror("fgets");
+    }
+    fflush(stdout);
+}
+
+
+
 void execute_command(char *command, int is_background)
 {
 
@@ -200,6 +234,11 @@ void execute_command(char *command, int is_background)
         return;
     }
 
+    else if (strcmp(args[0], "hostname") == 0)
+    {
+        change_hostname();
+        return;
+    }
 
     // Add other built-in commands here...
 
