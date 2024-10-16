@@ -18,29 +18,28 @@
 #include "formatting.h"
 
 /* System includes */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <stdlib.h> // for malloc, NULL, exit
+#include <stdio.h>  // for printf, snprintf
+#include <string.h> // for strlen, strcpy, strcmp
+#include <dirent.h> // for DIR, opendir, readdir, closedir
 #include <unistd.h>
 #include <sys/types.h>
+#include <limits.h>
 #include <sys/wait.h>
 #include <ctype.h>
 #include <errno.h>
 
 void read_command(char *command)
 {
-    // put the terminalin non-canonical mode to gain raw control
+    // put the terminal in non-canonical mode to gain raw control
     make_raw_terminal();
-
     int index = 0;
     printf("%s", PS1);
     fflush(stdout);
-
     while (1)
     {
         char character;
         ssize_t nread = read(STDIN_FILENO, &character, 1);
-
         if (nread == -1 && errno != EAGAIN)
         {
             perror("read");
@@ -53,7 +52,6 @@ void read_command(char *command)
             restore_terminal();
             exit(0);
         }
-
         if (character == '\n')
         {
             command[index] = '\0';
@@ -85,36 +83,30 @@ void read_command(char *command)
             }
         }
     }
-
     // tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_terminal_input);
     // Restore original terminal settings
     restore_terminal();
-
     // Add command to history if it's not empty
     if (strlen(command) > 0)
     {
         add_to_history(command);
     }
 }
-
 void make_raw_terminal()
 {
     struct termios raw_terminal_input_mode;
     tcgetattr(STDIN_FILENO, &original_terminal_input);
     raw_terminal_input_mode = original_terminal_input;
-
     // Set raw mode
     raw_terminal_input_mode.c_lflag &= ~(ECHO | ICANON);
     raw_terminal_input_mode.c_cc[VMIN] = 1;
     raw_terminal_input_mode.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_terminal_input_mode);
 }
-
 void restore_terminal()
 {
     tcsetattr(STDIN_FILENO, TCSANOW, &original_terminal_input);
 }
-
 void man()
 {
     printf("This is Eggshell's user manual.\n"
@@ -125,37 +117,40 @@ void man()
            "exit -    Exit shell. Bye Bye.\n"END_PINK); 
 }
 
-void pwd_recurse(Node *nodePtr)
-{
-    if (nodePtr == root)
-    {
-        return;
+void change_directory(char *path) {
+    if (chdir(path) < 0) {
+        perror("chdir failed");
+    } else {
+        // Get and print the new current directory after the change
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            printf("Changed directory to: %s\n", cwd);
+        } else {
+            perror("getcwd failed");
+        }
     }
-    pwd_recurse(nodePtr->parent);
-    printf("/%s", nodePtr->name); // will unravel path from cwd -> root, printing from root -> cwd!
 }
 
 void pwd()
 {
-    pwd_recurse(cwd); // recursive function, starts from home, cwd' parent, etc, etc.
-    printf("\n");
+    char cwd[PATH_MAX];  // PATH_MAX is defined in <limits.h>
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("%s\n", cwd);
+    } else {
+        perror("getcwd failed");
+    }
 }
 
 void change_hostname()
 {
     char new_hostname[MAX_COMMAND_LENGTH]; // buffer for the new hostname
     printf("Enter new hostname: ");
-    
     if (fgets(new_hostname, sizeof(new_hostname), stdin) != NULL)
-    {
-        // Remove the newline character, if present
+    { // Remove the newline character, if present
         int len = strlen(new_hostname);
         if (len > 0 && new_hostname[len - 1] == '\n') {
             new_hostname[len - 1] = '\0';
         }
-
-
-
         if (strlen(new_hostname) > 0 && strlen(new_hostname) < MAX_COMMAND_LENGTH)
         {
             snprintf(PS1, sizeof(PS1), "[%s] $", new_hostname);
@@ -173,11 +168,43 @@ void change_hostname()
     fflush(stdout);
 }
 
+void cd(char *path)
+{
+    if (path == NULL || strcmp(path, "") == 0) 
+    {
+        // Change to home directory if no argument is given
+        const char *home_dir = getenv("HOME");
+        if (home_dir == NULL) 
+        {
+            fprintf(stderr, "cd: HOME not set\n");
+        } 
+        else if (chdir(home_dir) < 0) 
+        {
+            perror("cd");
+        }
+    } 
+    else if (strcmp(path, "..") == 0) 
+    {
+        // Move up one directory
+        if (chdir("..") < 0) 
+        {
+            perror("cd");
+        }
+    } 
+    else 
+    {
+        // Move to the specified directory
+        if (chdir(path) < 0) 
+        {
+            perror("cd");
+        }
+    }
 
 
+    
+}
 void execute_command(char *command, int is_background)
 {
-
     // Handle empty command first to easy out
     if (strlen(command) == 0)
     {
@@ -198,10 +225,8 @@ void execute_command(char *command, int is_background)
         if (strlen(command) == 0)
             return; // No valid command found
     }
-
     char *args[MAX_ARGS];
     int num_tokens;
-
     // Tokenize the command
     num_tokens = tokenise(command, args);
     if (num_tokens < 0)
@@ -209,7 +234,6 @@ void execute_command(char *command, int is_background)
         fprintf(stderr, "Error: Too many tokens\n");
         return;
     }
-
     // Handle built-in commands before forking
     if (strcmp(args[0], "exit") == 0)
     {
@@ -227,21 +251,31 @@ void execute_command(char *command, int is_background)
         pwd();
         return;
     }
-
     else if (strcmp(args[0], "man") == 0)
     {
         man();
         return;
     }
-
     else if (strcmp(args[0], "hostname") == 0)
     {
         change_hostname();
         return;
     }
-
+  
+    else if (strcmp(args[0], "cd") == 0) 
+    {
+        if (num_tokens > 1) 
+        {
+            cd(args[1]); // cd with argument
+        } 
+        else 
+        {
+            cd(NULL); // cd without argument
+        }
+        return;
+    }
+    
     // Add other built-in commands here...
-
     // Fork and execute external commands
     pid_t pid = fork();
     if (pid < 0)
@@ -366,7 +400,6 @@ void setup_signal_handlers()
         perror("sigaction SIGCHLD");
         exit(1);
     }
-
     // Setup for SIGQUIT
     sa_quit.sa_handler = &handle_sigquit;
     sigemptyset(&sa_quit.sa_mask);
@@ -386,19 +419,16 @@ void handle_sigchld(int sig)
         printf("[Process %d exited]\n", pid); // TODO remove this later????
     }
 }
-
 void handle_sigint(int sig)
 {
     restore_terminal();
     printf("\n");
     exit(0);
 }
-
 void handle_sigquit(int sig)
 {
     restore_terminal(); // Restore original terminal settings
-
-    // Reset SIGQUIT to its default action so that it generates a core dump incase this was cause by an error
+                        // Reset SIGQUIT to its default action so that it generates a core dump incase this was cause by an error
     struct sigaction sa;
     sa.sa_handler = SIG_DFL;
     sigemptyset(&sa.sa_mask);
@@ -408,33 +438,23 @@ void handle_sigquit(int sig)
         perror("sigaction");
         exit(1);
     }
-
     // Re-raise SIGQUIT to trigger the default behavior (core dump)
     raise(SIGQUIT);
 }
-
 int main()
 {
     char command[MAX_COMMAND_LENGTH];
     int rows, cols; // for terminal size. 
 
-    root = malloc(sizeof(Node));
-    strcpy(root->name, ""); // root has no name.
-    root->parent = NULL;
-    // root set, with name and parent ("" and NULL).
 
-    cwd = malloc(sizeof(Node));
-    strcpy(cwd->name, "home");
-    cwd->parent = root;
-
-    // Set up signal handlers
+    // set up signal handlers
     setup_signal_handlers();
 
     get_terminal_size(&rows, &cols);
 
-    // Display the welcome message
+    // display the welcome message
+    // size depends on terminal size, takes cols to check users window size, and decides which message to display
     welcome_message(cols);
-
     while (1)
     {
         // Read user input
@@ -447,9 +467,7 @@ int main()
         }
     }
 
-    // unreachable in current code, but good practice.
-    free(cwd);
-    free(root);
 
+// free resources
     return 0;
 }
