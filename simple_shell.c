@@ -106,9 +106,12 @@ void make_raw_terminal()
 void restore_terminal()
 {
     tcsetattr(STDIN_FILENO, TCSANOW, &original_terminal_input);
+    // restores terminal to original settings for standard input
 }
 void man()
 {
+    // displays user manual.
+    // list of available commands
     printf("This is Eggshell's user manual.\n"
            "Available commands:\n"
            "Usage: <hostname> $ <command>\n"
