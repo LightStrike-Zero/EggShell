@@ -211,8 +211,7 @@ void cd(char *path)
 }
 
 void execute_command(Command *cmd) {
-    // Handle empty command
-    if (cmd->command_name == NULL) {
+    if (cmd == NULL || cmd->command_name == NULL) {
         return;
     }
 
@@ -249,73 +248,91 @@ void execute_command(Command *cmd) {
         return;
     }
 
-    // Handle external commands
-    pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork");
-        return;
+    int num_pipes = 0;
+    Command *current_cmd = cmd;
+    while (current_cmd->next != NULL) {
+        num_pipes++;
+        current_cmd = current_cmd->next;
     }
-    if (pid == 0) {
-        // Child process
 
-        // Handle input redirection
-        if (cmd->input_redirection) {
-            freopen(cmd->input_redirection, "r", stdin);
+    int pipefds[2 * num_pipes];
+    for (int i = 0; i < num_pipes; i++) {
+        if (pipe(pipefds + i * 2) < 0) {
+            perror("pipe");
+            return;
         }
-        // Handle output redirection
-        if (cmd->output_redirection) {
-            freopen(cmd->output_redirection, cmd->append_output ? "a" : "w", stdout);
-        }
-        // Handle error redirection
-        if (cmd->error_redirection) {
-            freopen(cmd->error_redirection, "w", stderr);
-        }
+    }
 
-        // If there is a pipeline
-        if (cmd->next != NULL) {
-            int pipefd[2];
-            if (pipe(pipefd) == -1) {
-                perror("pipe");
-                exit(EXIT_FAILURE);
+    int pid;
+    int cmd_index = 0;
+    current_cmd = cmd;
+
+    while (current_cmd != NULL) {
+        pid = fork();
+        if (pid == 0) {
+            // Child process
+
+            // Input redirection
+            if (current_cmd->input_redirection) {
+                freopen(current_cmd->input_redirection, "r", stdin);
             }
 
-            pid_t pid2 = fork();
-            if (pid2 < 0) {
-                perror("fork");
-                exit(EXIT_FAILURE);
+            // Output redirection
+            if (current_cmd->output_redirection) {
+                freopen(current_cmd->output_redirection, current_cmd->append_output ? "a" : "w", stdout);
             }
-            if (pid2 == 0) {
-                // First command writes to pipe
-                close(pipefd[0]); // Close unused read end
-                dup2(pipefd[1], STDOUT_FILENO);
-                close(pipefd[1]);
 
-                execvp(cmd->command_name, cmd->args);
-                perror("execvp");
-                exit(EXIT_FAILURE);
-            } else {
-                // Second command reads from pipe
-                close(pipefd[1]); // Close unused write end
-                dup2(pipefd[0], STDIN_FILENO);
-                close(pipefd[0]);
-
-                // Execute next command
-                execute_command(cmd->next);
-                exit(EXIT_SUCCESS);
+            // Error redirection
+            if (current_cmd->error_redirection) {
+                freopen(current_cmd->error_redirection, "w", stderr);
             }
-        } else {
+
+            // If not the first command, read from previous pipe
+            if (cmd_index != 0) {
+                if (dup2(pipefds[(cmd_index - 1) * 2], STDIN_FILENO) < 0) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            // If not the last command, write to next pipe
+            if (current_cmd->next != NULL) {
+                if (dup2(pipefds[cmd_index * 2 + 1], STDOUT_FILENO) < 0) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            // Close all pipe fds
+            for (int i = 0; i < 2 * num_pipes; i++) {
+                close(pipefds[i]);
+            }
+
             // Execute command
-            execvp(cmd->command_name, cmd->args);
+            execvp(current_cmd->command_name, current_cmd->args);
             perror("execvp");
             exit(EXIT_FAILURE);
+        } else if (pid < 0) {
+            perror("fork");
+            return;
+        }
+
+        current_cmd = current_cmd->next;
+        cmd_index++;
+    }
+
+    // Close all pipe fds in parent
+    for (int i = 0; i < 2 * num_pipes; i++) {
+        close(pipefds[i]);
+    }
+
+    // Wait for all child processes
+    if (!cmd->is_background) {
+        for (int i = 0; i <= num_pipes; i++) {
+            wait(NULL);
         }
     } else {
-        // Parent process
-        if (!cmd->is_background) {
-            waitpid(pid, NULL, 0);
-        } else {
-            printf("[Background PID: %d]\n", pid);
-        }
+        printf("[Background PID: %d]\n", pid);
     }
 }
 

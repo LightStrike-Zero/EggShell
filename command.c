@@ -17,6 +17,7 @@ void init_command(Command *cmd) {
 
 // Free memory allocated in Command struct
 void free_command(Command *cmd) {
+    if (cmd == NULL) return;
     free(cmd->original_command);
     // Free each argument
     for (int i = 0; i < cmd->arg_count; i++) {
@@ -25,10 +26,8 @@ void free_command(Command *cmd) {
     free(cmd->input_redirection);
     free(cmd->output_redirection);
     free(cmd->error_redirection);
-    if (cmd->next != NULL) {
-        free_command(cmd->next);
-        free(cmd->next);
-    }
+    free_command(cmd->next);
+    free(cmd->next);
 }
 
 // Helper function to handle wildcard expansion
@@ -77,13 +76,16 @@ int parse_command_string(char *input, Command *cmd) {
             err_redirection = 1;
         } else if (strcmp(token, "|") == 0) {
             // Handle pipeline
-            cmd->next = malloc(sizeof(Command));
             char *remaining_input = strtok(NULL, "");
             if (remaining_input == NULL) {
                 fprintf(stderr, "Error: Expected command after '|'\n");
                 return -1;
             }
-            parse_command_string(remaining_input, cmd->next);
+            cmd->next = malloc(sizeof(Command));
+            if (parse_command_string(remaining_input, cmd->next) != 0) {
+                fprintf(stderr, "Error parsing piped command\n");
+                return -1;
+            }
             break;
         } else if (in_redirection) {
             cmd->input_redirection = strdup(token);
@@ -95,12 +97,8 @@ int parse_command_string(char *input, Command *cmd) {
             cmd->error_redirection = strdup(token);
             err_redirection = 0;
         } else {
-            // Check for wildcard characters
-            if (strpbrk(token, "*?") != NULL) {
-                expand_wildcards(token, cmd);
-            } else {
-                cmd->args[cmd->arg_count++] = strdup(token);
-            }
+            // Normal argument
+            cmd->args[cmd->arg_count++] = strdup(token);
         }
         token = strtok(NULL, " \t");
     }
