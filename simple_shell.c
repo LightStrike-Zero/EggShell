@@ -2,17 +2,16 @@
  * @file simple_shell.c
  * @brief A basic UNIX shell implementation for ICT374
  *
- * This program implements a basic UNIX shell that reads user commands,
- * executes them by forking child processes, and handles the `exit` command to
- * terminate the shell. It also includes functionality to reclaim zombie
- * processes.
- *
+ * This program implements a basic UNIX shell
+ * 
+ * 
  * @author Shaun Matthews & Louise Barjaktarevic
  * @date 25/09/2024
  */
 
 /* Our includes */
 #include "simple_shell.h"
+#include "command.h"
 #include "token.h"
 #include "history.h"
 #include "formatting.h"
@@ -28,6 +27,10 @@
 #include <sys/wait.h>
 #include <ctype.h>
 #include <errno.h>
+
+// these are both declared in smple_shell.h but allocated here
+char PS1[MAX_COMMAND_LENGTH] = "[374-shell] $ "; 
+struct termios original_terminal_input;
 
 void read_command(char *command)
 {
@@ -83,7 +86,6 @@ void read_command(char *command)
             }
         }
     }
-    // tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_terminal_input);
     // Restore original terminal settings
     restore_terminal();
     // Add command to history if it's not empty
@@ -92,6 +94,7 @@ void read_command(char *command)
         add_to_history(command);
     }
 }
+
 void make_raw_terminal()
 {
     struct termios raw_terminal_input_mode;
@@ -206,117 +209,122 @@ void cd(char *path)
 
     
 }
-void execute_command(char *command, int is_background)
-{
-    // Handle empty command first to easy out
-    if (strlen(command) == 0)
-    {
+
+void execute_command(Command *cmd) {
+    // Handle empty command
+    if (cmd->command_name == NULL) {
         return;
     }
-    // Check for repeat command by number (!n)
-    if (command[0] == '!' && isdigit(command[1]))
-    {
-        int command_number = atoi(&command[1]);
-        repeat_command_by_number(command_number, command);
-        if (strlen(command) == 0)
-            return; // No valid command found
-    }
-    // Check for repeat command by string (!string)
-    else if (command[0] == '!' && isalpha(command[1]))
-    {
-        repeat_command_by_string(&command[1], command);
-        if (strlen(command) == 0)
-            return; // No valid command found
-    }
-    char *args[MAX_ARGS];
-    int num_tokens;
-    // Tokenize the command
-    num_tokens = tokenise(command, args);
-    if (num_tokens < 0)
-    {
-        fprintf(stderr, "Error: Too many tokens\n");
-        return;
-    }
-    // Handle built-in commands before forking
-    if (strcmp(args[0], "exit") == 0)
-    {
+
+    // Handle built-in commands
+    if (strcmp(cmd->command_name, "exit") == 0) {
         restore_terminal();
         printf("Exiting shell...\n");
         exit(0);
-    }
-    else if (strcmp(args[0], "history") == 0)
-    {
+    } else if (strcmp(cmd->command_name, "history") == 0) {
         show_history();
         return;
-    }
-    else if (strcmp(args[0], "pwd") == 0)
-    {
+    } else if (strcmp(cmd->command_name, "pwd") == 0) {
         pwd();
         return;
-    }
-    else if (strcmp(args[0], "man") == 0)
-    {
+    } else if (strcmp(cmd->command_name, "man") == 0) {
         man();
         return;
-    }
-    else if (strcmp(args[0], "hostname") == 0)
-    {
+    } else if (strcmp(cmd->command_name, "hostname") == 0) {
         change_hostname();
         return;
-    }
-  
-    else if (strcmp(args[0], "cd") == 0) 
-    {
-        if (num_tokens > 1) 
-        {
-            cd(args[1]); // cd with argument
-        } 
-        else 
-        {
+    } else if (strcmp(cmd->command_name, "cd") == 0) {
+        if (cmd->arg_count > 1) {
+            cd(cmd->args[1]); // cd with argument
+        } else {
             cd(NULL); // cd without argument
         }
         return;
+    } else if (strcmp(cmd->command_name, "prompt") == 0) {
+        if (cmd->arg_count > 1) {
+            snprintf(PS1, sizeof(PS1), "%s", cmd->args[1]);
+        } else {
+            fprintf(stderr, "Usage: prompt <new_prompt>\n");
+        }
+        return;
     }
-    
-    // Add other built-in commands here...
-    // Fork and execute external commands
+
+    // Handle external commands
     pid_t pid = fork();
-    if (pid < 0)
-    {
+    if (pid < 0) {
         perror("fork");
         return;
     }
-    if (pid == 0)
-    {
+    if (pid == 0) {
         // Child process
-        if (is_background)
-        {
-            setpgid(0, 0); // Detach from the controlling terminal
+
+        // Handle input redirection
+        if (cmd->input_redirection) {
+            freopen(cmd->input_redirection, "r", stdin);
         }
-        if (execvp(args[0], args) < 0)
-        {
+        // Handle output redirection
+        if (cmd->output_redirection) {
+            freopen(cmd->output_redirection, cmd->append_output ? "a" : "w", stdout);
+        }
+        // Handle error redirection
+        if (cmd->error_redirection) {
+            freopen(cmd->error_redirection, "w", stderr);
+        }
+
+        // If there is a pipeline
+        if (cmd->next != NULL) {
+            int pipefd[2];
+            if (pipe(pipefd) == -1) {
+                perror("pipe");
+                exit(EXIT_FAILURE);
+            }
+
+            pid_t pid2 = fork();
+            if (pid2 < 0) {
+                perror("fork");
+                exit(EXIT_FAILURE);
+            }
+            if (pid2 == 0) {
+                // First command writes to pipe
+                close(pipefd[0]); // Close unused read end
+                dup2(pipefd[1], STDOUT_FILENO);
+                close(pipefd[1]);
+
+                execvp(cmd->command_name, cmd->args);
+                perror("execvp");
+                exit(EXIT_FAILURE);
+            } else {
+                // Second command reads from pipe
+                close(pipefd[1]); // Close unused write end
+                dup2(pipefd[0], STDIN_FILENO);
+                close(pipefd[0]);
+
+                // Execute next command
+                execute_command(cmd->next);
+                exit(EXIT_SUCCESS);
+            }
+        } else {
+            // Execute command
+            execvp(cmd->command_name, cmd->args);
             perror("execvp");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
-    }
-    else
-    {
+    } else {
         // Parent process
-        if (!is_background)
-        {
+        if (!cmd->is_background) {
             waitpid(pid, NULL, 0);
-        }
-        else
-        {
+        } else {
             printf("[Background PID: %d]\n", pid);
         }
     }
 }
 
-void parse_commands(char *input_command)
-{
-    char *commands[MAX_ARGS];
-    char separators[MAX_ARGS];
+
+// Existing includes...
+
+void parse_commands(char *input_command) {
+    char *commands_str[MAX_ARGS];
+    char *separators[MAX_ARGS];
     int num_commands = 0;
 
     // Copy input_command to a temporary buffer because strtok modifies the string
@@ -324,61 +332,52 @@ void parse_commands(char *input_command)
     strncpy(temp_input, input_command, MAX_COMMAND_LENGTH);
     temp_input[MAX_COMMAND_LENGTH - 1] = '\0';
 
-    char *cmd = temp_input;
-    while (cmd != NULL && num_commands < MAX_ARGS)
-    {
-        // Find next occurrence of ';' or '&'
-        char *sep = strpbrk(cmd, ";&");
-        if (sep != NULL)
-        {
-            separators[num_commands] = *sep;
+    char *cmd_str = temp_input;
+    while (cmd_str != NULL && num_commands < MAX_ARGS) {
+        // Find next occurrence of ';' or '&' not part of command arguments
+        char *sep = strpbrk(cmd_str, ";&");
+        if (sep != NULL) {
+            separators[num_commands] = strndup(sep, 1);
             *sep = '\0';
-            commands[num_commands++] = cmd;
-            cmd = sep + 1;
-        }
-        else
-        {
+            commands_str[num_commands++] = cmd_str;
+            cmd_str = sep + 1;
+        } else {
             // Last command without a following separator
-            commands[num_commands++] = cmd;
-            separators[num_commands - 1] = '\0';
+            commands_str[num_commands++] = cmd_str;
+            separators[num_commands - 1] = NULL;
             break;
         }
     }
 
-    for (int i = 0; i < num_commands; i++)
-    {
-        char *command = commands[i];
-        trim_whitespace(command);
+    for (int i = 0; i < num_commands; i++) {
+        Command cmd;
+        char *command_str = commands_str[i];
+        trim_whitespace(command_str);
 
-        if (strlen(command) == 0)
-        {
+        if (strlen(command_str) == 0) {
+            continue;
+        }
+
+        // Initialize Command struct
+        if (parse_command_string(command_str, &cmd) != 0) {
+            fprintf(stderr, "Failed to parse command: %s\n", command_str);
             continue;
         }
 
         // Determine if the command should run in the background
-        int is_background = 0;
-        if (separators[i] == '&')
-        {
-            is_background = 1;
-        }
-        else if (separators[i] == ';' || separators[i] == '\0')
-        {
-            is_background = 0;
-        }
-
-        // Check if the command ends with '&'
-        size_t len = strlen(command);
-        if (separators[i] == '\0' && len > 0 && command[len - 1] == '&')
-        {
-            is_background = 1;
-            command[len - 1] = '\0';
-            trim_whitespace(command);
+        if (separators[i] != NULL && strcmp(separators[i], "&") == 0) {
+            cmd.is_background = 1;
         }
 
         // Execute the command
-        execute_command(command, is_background);
+        execute_command(&cmd);
+
+        // Free allocated memory
+        free_command(&cmd);
+        free(separators[i]);
     }
 }
+
 
 void setup_signal_handlers()
 {
@@ -444,6 +443,8 @@ void handle_sigquit(int sig)
     // Re-raise SIGQUIT to trigger the default behavior (core dump)
     raise(SIGQUIT);
 }
+
+
 int main()
 {
     char command[MAX_COMMAND_LENGTH];
