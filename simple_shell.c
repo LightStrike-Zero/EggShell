@@ -457,7 +457,7 @@ void handle_sigchld(int sig)
     }
 }
 void handle_sigint(int sig) {
-    printf("\n%s", PS1);
+    printf("\nCannot terminate the shell using CTRL-C.\n%s", PS1);
     fflush(stdout);
 }
 void handle_sigquit(int sig) {
