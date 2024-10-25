@@ -29,7 +29,7 @@
 #include <errno.h>
 
 // these are both declared in smple_shell.h but allocated here
-char PS1[MAX_COMMAND_LENGTH] = "[374-shell] $ "; 
+char PS1[MAX_COMMAND_LENGTH] = "\%"; 
 struct termios original_terminal_input;
 
 void read_command(char *command)
