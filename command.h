@@ -8,6 +8,7 @@
 #include <glob.h>
 
 #define MAX_ARGS 1000
+#define MAX_TOKENS 1000
 #define MAX_COMMAND_LENGTH 1024
 
 typedef struct Command {

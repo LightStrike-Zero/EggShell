@@ -54,10 +54,16 @@ void handle_history_navigation(char *command, int *index, const char *PS1) {
 }
 
 void repeat_command_by_number(int command_number, char *command) {
-     if (command_number > 0 && command_number <= history_count) {
-        char *retrieved_command = history[(command_number - 1) % HISTORY_SIZE];
+    if (command_number > 0 && command_number <= history_count) {
+        int index = (command_number - 1) % HISTORY_SIZE;
+        char *retrieved_command = history[index];
+        if (retrieved_command[0] == '!') {
+            printf("Cannot repeat a command that starts with '!'\n");
+            command[0] = '\0';
+            return;
+        }
         strcpy(command, retrieved_command);
-        printf("%s\n", command); 
+        printf("%s\n", command); // Echo the command
     } else {
         printf("No such command in history.\n");
         command[0] = '\0';

@@ -51,19 +51,15 @@ int parse_command_string(char *input, Command *cmd) {
     init_command(cmd);
     cmd->original_command = strdup(input);
 
-    char *token;
+    char *tokens[MAX_TOKENS];
+    int num_tokens = tokenise(input, tokens);
+    int i = 0;
+
     int in_redirection = 0, out_redirection = 0, err_redirection = 0;
 
-    // Check for background execution
-    size_t len = strlen(input);
-    if (len > 0 && input[len - 1] == '&') {
-        cmd->is_background = 1;
-        input[len - 1] = '\0'; // Remove '&' from input
-    }
+    while (i < num_tokens) {
+        char *token = tokens[i];
 
-    // Tokenize the input command
-    token = strtok(input, " \t");
-    while (token != NULL) {
         if (strcmp(token, "<") == 0) {
             in_redirection = 1;
         } else if (strcmp(token, ">") == 0) {
@@ -76,12 +72,23 @@ int parse_command_string(char *input, Command *cmd) {
             err_redirection = 1;
         } else if (strcmp(token, "|") == 0) {
             // Handle pipeline
-            char *remaining_input = strtok(NULL, "");
-            if (remaining_input == NULL) {
+            if (i + 1 >= num_tokens) {
                 fprintf(stderr, "Error: Expected command after '|'\n");
                 return -1;
             }
             cmd->next = malloc(sizeof(Command));
+            if (cmd->next == NULL) {
+                fprintf(stderr, "Memory allocation failed\n");
+                exit(1);
+            }
+            // Construct remaining input for the next command
+            char remaining_input[MAX_COMMAND_LENGTH] = "";
+            for (int j = i + 1; j < num_tokens; j++) {
+                strcat(remaining_input, tokens[j]);
+                if (j < num_tokens - 1) {
+                    strcat(remaining_input, " ");
+                }
+            }
             if (parse_command_string(remaining_input, cmd->next) != 0) {
                 fprintf(stderr, "Error parsing piped command\n");
                 return -1;
@@ -100,7 +107,7 @@ int parse_command_string(char *input, Command *cmd) {
             // Normal argument
             cmd->args[cmd->arg_count++] = strdup(token);
         }
-        token = strtok(NULL, " \t");
+        i++;
     }
     cmd->args[cmd->arg_count] = NULL;
 
@@ -110,5 +117,11 @@ int parse_command_string(char *input, Command *cmd) {
         // No command to execute
         return -1;
     }
+
+    // Free tokens
+    for (int k = 0; k < num_tokens; k++) {
+        free(tokens[k]);
+    }
+
     return 0;
 }

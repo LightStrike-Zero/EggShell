@@ -4,6 +4,7 @@
 // added file header i think you forgot shaun 
 #define MAX_ARGS 1000
 #define MAX_TOKENS 1000
+#define MAX_TOKEN_LENGTH 1024
 #define TOKEN_SEPARATORS " \t\n"
 
 void trim_whitespace(char *str);

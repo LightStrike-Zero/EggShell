@@ -50,3 +50,6 @@ core.*
 Thumbs.db
 desktop.ini
 .vscode/settings.json
+token.o
+simple_shell.o
+simple_shell

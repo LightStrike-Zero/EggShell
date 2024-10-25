@@ -88,16 +88,21 @@ void read_command(char *command)
     }
     // Restore original terminal settings
     restore_terminal();
-    // Add command to history if it's not empty
-   if (command[0] == '!') {
-        if (isdigit(command[1])) {
+    // Handle history repetition
+    if (command[0] == '!') {
+        if (command[1] == '\0') {
+            // Repeat the last command
+            if (history_count > 0) {
+                repeat_command_by_number(history_count, command);
+            } else {
+                printf("No commands in history.\n");
+                command[0] = '\0'; // Clear the command
+            }
+        } else if (isdigit(command[1])) {
             int cmd_num = atoi(&command[1]);
             repeat_command_by_number(cmd_num, command);
-        } else if (command[1] != '\0') {
-            repeat_command_by_string(&command[1], command);
         } else {
-            printf("Invalid history command.\n");
-            command[0] = '\0'; // Clear the command
+            repeat_command_by_string(&command[1], command);
         }
     }
 
@@ -107,17 +112,23 @@ void read_command(char *command)
     }
 }
 
-void make_raw_terminal()
-{
+void make_raw_terminal() {
     struct termios raw_terminal_input_mode;
-    tcgetattr(STDIN_FILENO, &original_terminal_input);
+    if (tcgetattr(STDIN_FILENO, &original_terminal_input) == -1) {
+        perror("tcgetattr");
+        exit(1);
+    }
     raw_terminal_input_mode = original_terminal_input;
     // Set raw mode
     raw_terminal_input_mode.c_lflag &= ~(ECHO | ICANON);
     raw_terminal_input_mode.c_cc[VMIN] = 1;
     raw_terminal_input_mode.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_terminal_input_mode);
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_terminal_input_mode) == -1) {
+        perror("tcsetattr");
+        exit(1);
+    }
 }
+
 void restore_terminal()
 {
     tcsetattr(STDIN_FILENO, TCSANOW, &original_terminal_input);

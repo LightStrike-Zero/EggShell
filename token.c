@@ -36,6 +36,11 @@ int expand_wildcard(char *pattern, char *expanded_args[], int max_args)
         for (i = 0; i < glob_result.gl_pathc && count < max_args; i++)
         {
             expanded_args[count] = strdup(glob_result.gl_pathv[i]);
+            if (expanded_args[count] == NULL)
+            {
+                fprintf(stderr, "Memory allocation failed\n");
+                exit(1);
+            }
             count++;
         }
     }
@@ -51,46 +56,79 @@ int expand_wildcard(char *pattern, char *expanded_args[], int max_args)
     return count;
 }
 
-int tokenise(char line[], char *token[])
+int tokenise(char *line, char *tokens[])
 {
     int i = 0;
-    char *newToken = strtok(line, TOKEN_SEPARATORS);
+    char *ptr = line;
 
-    while (newToken != NULL)
+    while (*ptr != '\0')
     {
-        if (i >= MAX_TOKENS)
+        // Skip leading whitespace
+        while (isspace((unsigned char)*ptr))
         {
-            return -1; // Too many tokens
+            ptr++;
         }
+        if (*ptr == '\0')
+            break;
 
-        // Token contains a wildcard character?
-        if (strchr(newToken, '*') || strchr(newToken, '?'))
+        char *token = malloc(MAX_TOKEN_LENGTH);
+        if (token == NULL)
         {
-            int expanded = expand_wildcard(newToken, &token[i], MAX_TOKENS - i);
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(1);
+        }
+        int j = 0;
+        int in_single_quote = 0;
+        int in_double_quote = 0;
 
-            // If no wildcard expansion was found, treat the token as-is
-            if (expanded == 0)
+        while (*ptr != '\0' && (in_single_quote || in_double_quote || !isspace((unsigned char)*ptr)))
+        {
+            if (*ptr == '\\')
             {
-                token[i] = newToken; // No expansion, add original token
-                i++;
+                ptr++;
+                if (*ptr != '\0')
+                {
+                    token[j++] = *ptr++;
+                }
+            }
+            else if (*ptr == '\'' && !in_double_quote)
+            {
+                in_single_quote = !in_single_quote;
+                ptr++; // Skip the quote
+            }
+            else if (*ptr == '\"' && !in_single_quote)
+            {
+                in_double_quote = !in_double_quote;
+                ptr++; // Skip the quote
             }
             else
             {
-                i += expanded; // Increment i by the number of expanded tokens
+                token[j++] = *ptr++;
             }
+
+            if (j >= MAX_TOKEN_LENGTH - 1)
+            {
+                fprintf(stderr, "Token too long\n");
+                exit(1);
+            }
+        }
+        token[j] = '\0';
+
+        if (j > 0)
+        {
+            if (i >= MAX_TOKENS)
+            {
+                fprintf(stderr, "Too many tokens\n");
+                exit(1);
+            }
+
+            tokens[i++] = token;
         }
         else
         {
-            // Normal token, add to the token array
-            token[i] = newToken;
-            i++;
+            free(token);
         }
-
-        // Move to the next token
-        newToken = strtok(NULL, TOKEN_SEPARATORS);
     }
-
-    token[i] = NULL; // Null-terminate the token array
-
-    return i; // Return the number of tokens found
+    tokens[i] = NULL;
+    return i;
 }
