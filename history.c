@@ -54,13 +54,8 @@ void handle_history_navigation(char *command, int *index, const char *PS1) {
 }
 
 void repeat_command_by_number(int command_number, char *command) {
-    if (command_number > 0 && command_number <= history_count) {
-        char *retrieved_command = history[command_number - 1];
-        if (retrieved_command[0] == '!') {
-            printf("Cannot repeat a command that starts with '!'\n");
-            command[0] = '\0';
-            return;
-        }
+     if (command_number > 0 && command_number <= history_count) {
+        char *retrieved_command = history[(command_number - 1) % HISTORY_SIZE];
         strcpy(command, retrieved_command);
         printf("%s\n", command); 
     } else {
@@ -71,8 +66,8 @@ void repeat_command_by_number(int command_number, char *command) {
 
 void repeat_command_by_string(char *prefix, char *command) {
     for (int i = history_count - 1; i >= 0; i--) {
-        if (strncmp(history[i], prefix, strlen(prefix)) == 0) {
-            strcpy(command, history[i]);
+        if (strncmp(history[i % HISTORY_SIZE], prefix, strlen(prefix)) == 0) {
+            strcpy(command, history[i % HISTORY_SIZE]);
             printf("%s\n", command); 
             return;
         }

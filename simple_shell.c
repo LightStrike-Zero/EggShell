@@ -89,8 +89,20 @@ void read_command(char *command)
     // Restore original terminal settings
     restore_terminal();
     // Add command to history if it's not empty
-    if (strlen(command) > 0)
-    {
+   if (command[0] == '!') {
+        if (isdigit(command[1])) {
+            int cmd_num = atoi(&command[1]);
+            repeat_command_by_number(cmd_num, command);
+        } else if (command[1] != '\0') {
+            repeat_command_by_string(&command[1], command);
+        } else {
+            printf("Invalid history command.\n");
+            command[0] = '\0'; // Clear the command
+        }
+    }
+
+    // Add command to history if it's not empty and doesn't start with '!'
+    if (strlen(command) > 0 && command[0] != '!') {
         add_to_history(command);
     }
 }
@@ -396,17 +408,33 @@ void parse_commands(char *input_command) {
 }
 
 
-void setup_signal_handlers()
-{
-    struct sigaction sa_int, sa_chld, sa_quit;
+void setup_signal_handlers() {
+    struct sigaction sa_int, sa_chld, sa_quit, sa_tstp;
 
-    // Setup for SIGINT
+    // Setup for SIGINT (CTRL-C)
     sa_int.sa_handler = &handle_sigint;
     sigemptyset(&sa_int.sa_mask);
     sa_int.sa_flags = SA_RESTART;
-    if (sigaction(SIGINT, &sa_int, NULL) == -1)
-    {
+    if (sigaction(SIGINT, &sa_int, NULL) == -1) {
         perror("sigaction SIGINT");
+        exit(1);
+    }
+
+    // Setup for SIGQUIT (CTRL-\)
+    sa_quit.sa_handler = &handle_sigquit;
+    sigemptyset(&sa_quit.sa_mask);
+    sa_quit.sa_flags = SA_RESTART;
+    if (sigaction(SIGQUIT, &sa_quit, NULL) == -1) {
+        perror("sigaction SIGQUIT");
+        exit(1);
+    }
+
+    // Setup for SIGTSTP (CTRL-Z)
+    sa_tstp.sa_handler = &handle_sigtstp;
+    sigemptyset(&sa_tstp.sa_mask);
+    sa_tstp.sa_flags = SA_RESTART;
+    if (sigaction(SIGTSTP, &sa_tstp, NULL) == -1) {
+        perror("sigaction SIGTSTP");
         exit(1);
     }
 
@@ -414,18 +442,8 @@ void setup_signal_handlers()
     sa_chld.sa_handler = &handle_sigchld;
     sigemptyset(&sa_chld.sa_mask);
     sa_chld.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    if (sigaction(SIGCHLD, &sa_chld, NULL) == -1)
-    {
+    if (sigaction(SIGCHLD, &sa_chld, NULL) == -1) {
         perror("sigaction SIGCHLD");
-        exit(1);
-    }
-    // Setup for SIGQUIT
-    sa_quit.sa_handler = &handle_sigquit;
-    sigemptyset(&sa_quit.sa_mask);
-    sa_quit.sa_flags = SA_RESTART;
-    if (sigaction(SIGQUIT, &sa_quit, NULL) == -1)
-    {
-        perror("sigaction SIGQUIT");
         exit(1);
     }
 }
@@ -438,29 +456,18 @@ void handle_sigchld(int sig)
         printf("[Process %d exited]\n", pid); // TODO remove this later????
     }
 }
-void handle_sigint(int sig)
-{
-    restore_terminal();
-    printf("\n");
-    exit(0);
+void handle_sigint(int sig) {
+    printf("\n%s", PS1);
+    fflush(stdout);
 }
-void handle_sigquit(int sig)
-{
-    restore_terminal(); // Restore original terminal settings
-                        // Reset SIGQUIT to its default action so that it generates a core dump incase this was cause by an error
-    struct sigaction sa;
-    sa.sa_handler = SIG_DFL;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    if (sigaction(SIGQUIT, &sa, NULL) == -1)
-    {
-        perror("sigaction");
-        exit(1);
-    }
-    // Re-raise SIGQUIT to trigger the default behavior (core dump)
-    raise(SIGQUIT);
+void handle_sigquit(int sig) {
+    printf("\nCannot quit the shell using CTRL-\\.\n%s", PS1);
+    fflush(stdout);
 }
-
+void handle_sigtstp(int sig) {
+    printf("\nCannot suspend the shell using CTRL-Z.\n%s", PS1);
+    fflush(stdout);
+}
 
 int main()
 {
