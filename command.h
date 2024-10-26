@@ -2,14 +2,14 @@
 #ifndef COMMAND_H
 #define COMMAND_H
 
+#include "definitions.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <glob.h>
 
-#define MAX_ARGS 1000
-#define MAX_TOKENS 1000
-#define MAX_COMMAND_LENGTH 1024
+
 
 typedef struct Command {
     char *original_command;           // The original command string entered by the user
@@ -25,6 +25,7 @@ typedef struct Command {
 } Command;
 
 // Function declarations
+void read_command(char *command);
 void init_command(Command *cmd);
 int parse_command_string(char *input, Command *cmd);
 void free_command(Command *cmd);

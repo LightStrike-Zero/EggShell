@@ -1,5 +1,100 @@
-#include "command.h"
+/**
+ * @file command_parser.c
+ * @brief Command parsing functions
+ *
+ * This file contains functions to parse command strings into Command structures.
+ * 
+ */
 
+#include "command.h"
+#include "definitions.h"
+#include "history.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <ctype.h>
+
+void read_command(char *command)
+{
+    // put the terminal in non-canonical mode to gain raw control
+    make_raw_terminal();
+    int index = 0;
+    printf("%s", PS1);
+    fflush(stdout);
+    while (1)
+    {
+        char character;
+        ssize_t nread = read(STDIN_FILENO, &character, 1);
+        if (nread == -1 && errno != EAGAIN)
+        {
+            perror("read");
+            break;
+        }
+        else if (nread == 0)
+        {
+            // EOF (Ctrl+D)
+            printf("\n");
+            restore_terminal();
+            exit(0);
+        }
+        if (character == '\n')
+        {
+            command[index] = '\0';
+            printf("\n");
+            break;
+        }
+        else if (character == BACKSPACE || character == 8)
+        {
+            if (index > 0)
+            {
+                index--;
+                command[index] = '\0';
+                printf("\b \b");
+                fflush(stdout);
+            }
+        }
+        else if (character == ESCAPE)
+        {
+            handle_history_navigation(command, &index, PS1);
+        }
+        else if (isprint(character))
+        {
+            if (index < MAX_COMMAND_LENGTH - 1)
+            {
+                command[index++] = character;
+                command[index] = '\0';
+                printf("%c", character);
+                fflush(stdout);
+            }
+        }
+    }
+    // Restore original terminal settings
+    restore_terminal();
+    // Handle history repetition
+    if (command[0] == '!') {
+        if (command[1] == '\0') {
+            // Repeat the last command
+            if (history_count > 0) {
+                repeat_command_by_number(history_count, command);
+            } else {
+                printf("No commands in history.\n");
+                command[0] = '\0'; // Clear the command
+            }
+        } else if (isdigit(command[1])) {
+            int cmd_num = atoi(&command[1]);
+            repeat_command_by_number(cmd_num, command);
+        } else {
+            repeat_command_by_string(&command[1], command);
+        }
+    }
+
+    // Add command to history if it's not empty and doesn't start with '!'
+    if (strlen(command) > 0 && command[0] != '!') {
+        add_to_history(command);
+    }
+}
 
 // Initialize the Command struct
 void init_command(Command *cmd) {
@@ -48,6 +143,7 @@ void expand_wildcards(char *token, Command *cmd) {
 
 // Parse individual command string into Command struct
 int parse_command_string(char *input, Command *cmd) {
+
     init_command(cmd);
     cmd->original_command = strdup(input);
 
@@ -124,4 +220,60 @@ int parse_command_string(char *input, Command *cmd) {
     }
 
     return 0;
+}
+
+void parse_commands(char *input_command) {
+    char *commands_str[MAX_ARGS];
+    char *separators[MAX_ARGS];
+    int num_commands = 0;
+
+    // Copy input_command to a temporary buffer because strtok modifies the string
+    char temp_input[MAX_COMMAND_LENGTH];
+    strncpy(temp_input, input_command, MAX_COMMAND_LENGTH);
+    temp_input[MAX_COMMAND_LENGTH - 1] = '\0';
+
+    char *cmd_str = temp_input;
+    while (cmd_str != NULL && num_commands < MAX_ARGS) {
+        // Find next occurrence of ';' or '&' not part of command arguments
+        char *sep = strpbrk(cmd_str, ";&");
+        if (sep != NULL) {
+            separators[num_commands] = strndup(sep, 1);
+            *sep = '\0';
+            commands_str[num_commands++] = cmd_str;
+            cmd_str = sep + 1;
+        } else {
+            // Last command without a following separator
+            commands_str[num_commands++] = cmd_str;
+            separators[num_commands - 1] = NULL;
+            break;
+        }
+    }
+
+    for (int i = 0; i < num_commands; i++) {
+        Command cmd;
+        char *command_str = commands_str[i];
+        trim_whitespace(command_str);
+
+        if (strlen(command_str) == 0) {
+            continue;
+        }
+
+        // Initialize Command struct
+        if (parse_command_string(command_str, &cmd) != 0) {
+            fprintf(stderr, "Failed to parse command: %s\n", command_str);
+            continue;
+        }
+
+        // Determine if the command should run in the background
+        if (separators[i] != NULL && strcmp(separators[i], "&") == 0) {
+            cmd.is_background = 1;
+        }
+
+        // Execute the command
+        execute_command(&cmd);
+
+        // Free allocated memory
+        free_command(&cmd);
+        free(separators[i]);
+    }
 }

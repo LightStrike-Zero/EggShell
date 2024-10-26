@@ -1,12 +1,12 @@
 #include "formatting.h"
 
-void get_terminal_size(int *rows, int *cols)
-{
-    struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    *rows = w.ws_row; 
-    *cols = w.ws_col;
-}
+// void get_terminal_size(int *rows, int *cols)
+// {
+//     struct winsize w;
+//     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+//     *rows = w.ws_row; 
+//     *cols = w.ws_col;
+// }
 
 void welcome_message(int width)
 {

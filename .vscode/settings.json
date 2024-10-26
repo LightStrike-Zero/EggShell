@@ -3,6 +3,11 @@
         "stdlib.h": "c",
         "stdio.h": "c",
         "command.h": "c",
-        "simple_shell.h": "c"
+        "simple_shell.h": "c",
+        "builtins.h": "c",
+        "execution.h": "c",
+        "string.h": "c",
+        "definitions.h": "c",
+        "ctype.h": "c"
     }
 }
