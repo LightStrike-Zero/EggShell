@@ -1,7 +1,7 @@
 #ifndef HISTORY_H
 #define HISTORY_H
 
-#define MAX_COMMAND_LENGTH 100
+#define MAX_COMMAND_LENGTH 1024
 #define HISTORY_SIZE 10
 
 // Command stack structure
