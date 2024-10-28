@@ -2,9 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
 
-
-#define MAX_COMMAND_LENGTH 100
 #define HISTORY_SIZE 10
 
 CommandStack history_stack = {.top = -1}; // Initialize stack
