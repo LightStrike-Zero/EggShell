@@ -35,17 +35,17 @@ char PS1[MAX_COMMAND_LENGTH] = "%"; // Default shell prompt
 int main()
 {
     char command[MAX_COMMAND_LENGTH];
-    int rows, cols; // for terminal size. 
+   // int rows, cols; // for terminal size. 
 
 
     // set up signal handlers
     setup_signal_handlers();
 
-    get_terminal_size(&rows, &cols);
+ //   get_terminal_size(&rows, &cols);
 
     // display the welcome message
     // size depends on terminal size, takes cols to check users window size, and decides which message to display
-    welcome_message(cols);
+    welcome_message();
     while (1)
     {
         // Read user input
