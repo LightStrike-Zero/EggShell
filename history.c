@@ -1,11 +1,11 @@
 #include "history.h"
+#include "definitions.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
 
-#define HISTORY_SIZE 10
-
+int history_count = 0;
 CommandStack history_stack = {.top = -1}; // Initialize stack
 
 // Push command onto the stack
@@ -22,6 +22,11 @@ void push_command(CommandStack *stack, const char *command) {
         strncpy(stack->commands[HISTORY_SIZE - 1], command, MAX_COMMAND_LENGTH - 1);
         stack->commands[HISTORY_SIZE - 1][MAX_COMMAND_LENGTH - 1] = '\0'; // Null-terminate
     }
+}
+
+// Add command to history (push onto stack)
+void add_to_history(const char *command) {
+    push_command(&history_stack, command);
 }
 
 // Show all commands in the stack
