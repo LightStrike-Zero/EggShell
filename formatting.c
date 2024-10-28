@@ -1,7 +1,7 @@
 #include "formatting.h"
 
 
-void welcome_message(int width)
+void welcome_message()
 {
    
     
