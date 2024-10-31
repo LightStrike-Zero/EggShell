@@ -6,6 +6,13 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/select.h>
+#include <errno.h>      // Corrected from <cerrno>
+#include <signal.h>     // Added for signal handling
+#include <sys/wait.h>   // Added for waitpid and WNOHANG
+
+
+#define BUFFER_SIZE 1024
 
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
@@ -29,9 +36,20 @@ int client_count = 0;               // Track the number of clients
 int setup_server_socket(int port);
 int authenticate(int client_fd);
 void handle_client(int client_fd);
+void sigchld_handler(int signum);
 
 int main()
 {
+    struct sigaction sa;
+    sa.sa_handler = sigchld_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART; // Restart interrupted system calls
+    if (sigaction(SIGCHLD, &sa, NULL) == -1)
+    {
+        perror("sigaction");
+        exit(1);
+    }
+
     // Step 1: Initialize server socket
     int server_fd = setup_server_socket(PORT);
 
@@ -52,10 +70,10 @@ int main()
         // Step 3: Fork a new process for each client
         pid_t pid = fork();
         if (pid == 0)
-        {                             // Child process
-            close(server_fd);         // Close unused server socket in child
-            handle_client(client_fd); // Handle the client
-            exit(0);                  // End child process after handling client
+        { // Child process
+            close(server_fd);
+            handle_client(client_fd);
+            exit(0);
         }
         else if (client_count < 100)
         {
@@ -66,7 +84,7 @@ int main()
         else
         {
             perror("Max client limit reached.");
-            close(client_fd); // Close the new client socket if limit reached
+            close(client_fd);
         }
         close(client_fd); // Close unused client socket in parent
     }
@@ -90,10 +108,10 @@ int setup_server_socket(int port)
     }
 
     // Configure server address
-    memset((char *)&serv_addr, 0, sizeof(serv_addr));
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(PORT);
+    serv_addr.sin_port = htons(port);
 
     // Bind socket to port
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
@@ -111,16 +129,10 @@ int setup_server_socket(int port)
         exit(1);
     }
 
-    printf("Server listening on port %d\n", PORT);
+    printf("Server listening on port %d\n", port);
 
-    // Keep the server running indefinitely
-    while (1)
-    {
-        // pause(); // Wait indefinitely
-    }
-
-    close(sockfd);
-    return 0;
+    // Return the server socket descriptor to main
+    return sockfd;
 }
 
 int authenticate(int client_fd)
@@ -153,36 +165,124 @@ int authenticate(int client_fd)
     }
 }
 
-void handle_client(int client_fd)
-{
+void handle_client(int client_fd) {
     // Authenticate the client first
-    if (!authenticate(client_fd))
-    {
+    if (!authenticate(client_fd)) {
         close(client_fd);
-        exit(0); // Terminate child process if authentication fails
+        exit(0);  // Terminate child process if authentication fails
     }
 
-    char command_buffer[256];
-    while (1)
-    {
-        memset(command_buffer, 0, sizeof(command_buffer));
-        int n = read(client_fd, command_buffer, sizeof(command_buffer) - 1);
-        if (n <= 0)
-            break; // Client disconnected
+    int shell_to_server[2]; // Pipe from shell's stdout/stderr to server
+    int server_to_shell[2]; // Pipe from server to shell's stdin
 
-        command_buffer[n] = '\0'; // Null-terminate the command string
+    // Create pipes for communication with the shell
+    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
+        perror("Pipe creation failed");
+        close(client_fd);
+        exit(1);
+    }
 
-        // Check if client wants to exit
-        if (strcmp(command_buffer, "Bye bye") == 0)
-        {
-            write(client_fd, "Disconnecting...", strlen("Disconnecting..."));
-            break;
+    pid_t pid = fork();
+    if (pid == 0) {  // Child process (shell)
+        // Redirect shell's stdin, stdout, and stderr to the pipes
+        dup2(server_to_shell[0], STDIN_FILENO);   // Shell's stdin
+        dup2(shell_to_server[1], STDOUT_FILENO);  // Shell's stdout
+        dup2(shell_to_server[1], STDERR_FILENO);  // Shell's stderr
+
+        // **Implementing Number 10: Close unused ends in child**
+        close(server_to_shell[1]); // Child doesn't write to server_to_shell
+        close(shell_to_server[0]); // Child doesn't read from shell_to_server
+        close(client_fd);          // Child doesn't need client's socket
+
+        // Execute the shell
+        execlp("/bin/bash", "bash", NULL);
+        perror("Failed to execute shell");
+        exit(1);
+    } else if (pid > 0) {  // Parent process (server handling client)
+        // **Implementing Number 10: Close unused ends in parent**
+        close(server_to_shell[0]); // Parent doesn't read from server_to_shell
+        close(shell_to_server[1]); // Parent doesn't write to shell_to_server
+
+        fd_set read_fds;
+        int max_fd = (client_fd > shell_to_server[0]) ? client_fd : shell_to_server[0];
+        char buffer[BUFFER_SIZE];
+        ssize_t nbytes;
+
+        while (1) {
+            FD_ZERO(&read_fds);
+            FD_SET(client_fd, &read_fds);
+            FD_SET(shell_to_server[0], &read_fds);
+
+            // Wait for data on either the client socket or the shell output
+            int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+            if (activity < 0 && errno != EINTR) {
+                perror("Select error");
+                break;
+            }
+
+            // **Implementing Number 8: Handle partial reads/writes from client to shell**
+            if (FD_ISSET(client_fd, &read_fds)) {
+                nbytes = read(client_fd, buffer, sizeof(buffer));
+                if (nbytes <= 0) {
+                    if (nbytes == 0) {
+                        // Client disconnected
+                        break;
+                    } else {
+                        perror("Read error from client");
+                        break;
+                    }
+                }
+
+                ssize_t total_written = 0;
+                while (total_written < nbytes) {
+                    ssize_t bytes_written = write(server_to_shell[1], buffer + total_written, nbytes - total_written);
+                    if (bytes_written <= 0) {
+                        perror("Write error to shell");
+                        break;
+                    }
+                    total_written += bytes_written;
+                }
+            }
+
+            // **Implementing Number 8: Handle partial reads/writes from shell to client**
+            if (FD_ISSET(shell_to_server[0], &read_fds)) {
+                nbytes = read(shell_to_server[0], buffer, sizeof(buffer));
+                if (nbytes <= 0) {
+                    if (nbytes == 0) {
+                        // Shell closed
+                        break;
+                    } else {
+                        perror("Read error from shell");
+                        break;
+                    }
+                }
+
+                ssize_t total_written = 0;
+                while (total_written < nbytes) {
+                    ssize_t bytes_written = write(client_fd, buffer + total_written, nbytes - total_written);
+                    if (bytes_written <= 0) {
+                        perror("Write error to client");
+                        break;
+                    }
+                    total_written += bytes_written;
+                }
+            }
         }
 
-        // Respond to other commands
-        write(client_fd, "Command received", strlen("Command received"));
+        // Close all open descriptors
+        close(server_to_shell[1]);
+        close(shell_to_server[0]);
+        close(client_fd);
+    } else {
+        perror("Fork failed");
+        close(client_fd);
+        exit(1);
     }
+}
 
-    close(client_fd); // Close connection when done
-    exit(0);          // End child process
+void sigchld_handler(int signum)
+{
+    // Reap all terminated child processes
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
 }
