@@ -122,7 +122,41 @@ int tokenise(char *line, char *tokens[])
                 exit(1);
             }
 
-            tokens[i++] = token;
+            // Check for wildcards in the token
+            if (strpbrk(token, "*?") != NULL)
+            {
+                // Perform wildcard expansion
+                glob_t glob_result;
+                memset(&glob_result, 0, sizeof(glob_result));
+
+                int glob_ret = glob(token, GLOB_TILDE, NULL, &glob_result);
+                if (glob_ret == 0)
+                {
+                    // Copy expanded tokens into tokens array
+                    for (size_t k = 0; k < glob_result.gl_pathc; k++)
+                    {
+                        if (i >= MAX_TOKENS)
+                        {
+                            fprintf(stderr, "Too many tokens after expansion\n");
+                            exit(1);
+                        }
+                        tokens[i++] = strdup(glob_result.gl_pathv[k]);
+                    }
+                    free(token); // Original token is no longer needed
+                }
+                else
+                {
+                    // No matches found; keep the token as is
+                    tokens[i++] = token;
+                }
+
+                globfree(&glob_result);
+            }
+            else
+            {
+                // No wildcard; add token as is
+                tokens[i++] = token;
+            }
         }
         else
         {

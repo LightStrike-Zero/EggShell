@@ -8,7 +8,7 @@
 #define TOKEN_SEPARATORS " \t\n"
 
 void trim_whitespace(char *str);
-int tokenise(char line[], char *token[]);
+int tokenise(char *line, char *tokens[]);
 int expand_wildcard(char *pattern, char *expanded_args[], int max_args);
 
 #endif
