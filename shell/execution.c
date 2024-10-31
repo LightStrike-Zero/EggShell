@@ -67,8 +67,8 @@ void execute_command(Command *cmd) {
         } 
         if(cmd->arg_count == 2)
         {
-            char *hostname = "127.0.0.1";
-            int port = atoi(cmd->args[1]);
+            char *hostname = cmd->args[1];
+            int port = 40210;
             connect_to_server(hostname, port);
         }
         
