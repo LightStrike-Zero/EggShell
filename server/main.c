@@ -156,6 +156,8 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes)
             buffer[j++] = buffer[i];
         }
     }
+    buffer[j] = '\0'; // Null-terminate for safe printing
+    printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
     return j;
 }
 
@@ -175,6 +177,9 @@ int authenticate(int client_fd)
     ssize_t clean_nbytes = strip_cr(buffer, n);
     buffer[clean_nbytes] = '\0'; // Ensure null-termination after stripping
 
+    // Debugging: Print the stripped input
+    printf("Authentication input after strip_cr: \"%s\"\n", buffer);
+
     // Parse username and password from buffer
     char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
     sscanf(buffer, "%29s %11s", received_username, received_password);
@@ -184,11 +189,13 @@ int authenticate(int client_fd)
         strcmp(received_password, userTable.password) == 0)
     {
         write(client_fd, "Authentication successful\n", strlen("Authentication successful\n"));
+        printf("User \"%s\" authenticated successfully.\n", received_username); // Debugging
         return 1; // Authentication success
     }
     else
     {
         write(client_fd, "Authentication failed\n", strlen("Authentication failed\n"));
+        printf("User \"%s\" failed to authenticate.\n", received_username); // Debugging
         return 0; // Authentication failed
     }
 }
@@ -217,9 +224,13 @@ void handle_client(int client_fd)
     if (pid == 0)
     { // Child process (shell)
         // Redirect shell's stdin, stdout, and stderr to the pipes
-        dup2(server_to_shell[0], STDIN_FILENO);  // Shell's stdin
-        dup2(shell_to_server[1], STDOUT_FILENO); // Shell's stdout
-        dup2(shell_to_server[1], STDERR_FILENO); // Shell's stderr
+        if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
+            dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
+            dup2(shell_to_server[1], STDERR_FILENO) == -1)
+        {
+            perror("dup2 failed");
+            exit(1);
+        }
 
         // **Implementing Number 10: Close unused ends in child**
         close(server_to_shell[1]); // Child doesn't write to server_to_shell
@@ -265,17 +276,29 @@ void handle_client(int client_fd)
                     if (nbytes == 0)
                     {
                         // Client disconnected
-                        break;
+                        printf("Client disconnected.\n");
                     }
                     else
                     {
                         perror("Read error from client");
-                        break;
                     }
+                    break;
                 }
 
                 // Strip '\r' from buffer
                 ssize_t clean_nbytes = strip_cr(buffer, nbytes);
+                buffer[clean_nbytes] = '\0'; // Ensure null-termination
+
+                // Debugging: Print the command being sent to the shell
+                printf("Sending to shell: \"%s\"\n", buffer);
+
+                // Check for termination command
+                if (strcmp(buffer, "Bye bye") == 0)
+                {
+                    write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
+                    printf("Received termination command from client.\n");
+                    break;
+                }
 
                 // Write cleaned data to the shell's stdin
                 ssize_t total_written = 0;
@@ -300,14 +323,17 @@ void handle_client(int client_fd)
                     if (nbytes == 0)
                     {
                         // Shell closed
-                        break;
+                        printf("Shell process closed.\n");
                     }
                     else
                     {
                         perror("Read error from shell");
-                        break;
                     }
+                    break;
                 }
+
+                // Debugging: Print the data received from the shell
+                printf("Received from shell: \"%.*s\"\n", (int)nbytes, buffer);
 
                 // Write shell output to the client
                 ssize_t total_written = 0;
