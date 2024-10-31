@@ -7,10 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>      // Corrected from <cerrno>
-#include <signal.h>     // Added for signal handling
-#include <sys/wait.h>   // Added for waitpid and WNOHANG
-
+#include <errno.h>    // Corrected from <cerrno>
+#include <signal.h>   // Added for signal handling
+#include <sys/wait.h> // Added for waitpid and WNOHANG
 
 #define BUFFER_SIZE 1024
 
@@ -33,17 +32,21 @@ struct UserTable
 struct ClientInfo client_list[100]; // Fixed size for simplicity
 int client_count = 0;               // Track the number of clients
 
+// Function prototypes
 int setup_server_socket(int port);
 int authenticate(int client_fd);
 void handle_client(int client_fd);
+ssize_t strip_cr(char *buffer, ssize_t nbytes);
 void sigchld_handler(int signum);
 
 int main()
 {
+    // Set up the SIGCHLD handler to reap zombie processes
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART; // Restart interrupted system calls
+
     if (sigaction(SIGCHLD, &sa, NULL) == -1)
     {
         perror("sigaction");
@@ -70,23 +73,31 @@ int main()
         // Step 3: Fork a new process for each client
         pid_t pid = fork();
         if (pid == 0)
-        { // Child process
-            close(server_fd);
-            handle_client(client_fd);
-            exit(0);
+        {                             // Child process
+            close(server_fd);         // Close unused server socket in child
+            handle_client(client_fd); // Handle the client
+            exit(0);                  // End child process after handling client
         }
-        else if (client_count < 100)
+        else if (pid > 0)
         {
-            client_list[client_count].client_socket = client_fd;
-            client_list[client_count].pid = pid;
-            client_count++;
+            if (client_count < 100)
+            {
+                client_list[client_count].client_socket = client_fd;
+                client_list[client_count].pid = pid;
+                client_count++;
+            }
+            else
+            {
+                perror("Max client limit reached.");
+                close(client_fd); // Close the new client socket if limit reached
+            }
+            close(client_fd); // Close unused client socket in parent
         }
         else
         {
-            perror("Max client limit reached.");
+            perror("Fork failed");
             close(client_fd);
         }
-        close(client_fd); // Close unused client socket in parent
     }
 
     // Cleanup
@@ -135,6 +146,19 @@ int setup_server_socket(int port)
     return sockfd;
 }
 
+ssize_t strip_cr(char *buffer, ssize_t nbytes)
+{
+    ssize_t j = 0;
+    for (ssize_t i = 0; i < nbytes; i++)
+    {
+        if (buffer[i] != '\r')
+        {
+            buffer[j++] = buffer[i];
+        }
+    }
+    return j;
+}
+
 int authenticate(int client_fd)
 {
     char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 1];  // Additional byte for separating username and password
@@ -147,9 +171,13 @@ int authenticate(int client_fd)
 
     buffer[n] = '\0'; // Null-terminate to ensure it’s a proper string
 
+    // Strip '\r' from buffer
+    ssize_t clean_nbytes = strip_cr(buffer, n);
+    buffer[clean_nbytes] = '\0'; // Ensure null-termination after stripping
+
     // Parse username and password from buffer
     char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
-    sscanf(buffer, "%s %s", received_username, received_password);
+    sscanf(buffer, "%29s %11s", received_username, received_password);
 
     // Check against the user table
     if (strcmp(received_username, userTable.username) == 0 &&
@@ -165,29 +193,33 @@ int authenticate(int client_fd)
     }
 }
 
-void handle_client(int client_fd) {
+void handle_client(int client_fd)
+{
     // Authenticate the client first
-    if (!authenticate(client_fd)) {
+    if (!authenticate(client_fd))
+    {
         close(client_fd);
-        exit(0);  // Terminate child process if authentication fails
+        exit(0); // Terminate child process if authentication fails
     }
 
     int shell_to_server[2]; // Pipe from shell's stdout/stderr to server
     int server_to_shell[2]; // Pipe from server to shell's stdin
 
     // Create pipes for communication with the shell
-    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
+    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1)
+    {
         perror("Pipe creation failed");
         close(client_fd);
         exit(1);
     }
 
     pid_t pid = fork();
-    if (pid == 0) {  // Child process (shell)
+    if (pid == 0)
+    { // Child process (shell)
         // Redirect shell's stdin, stdout, and stderr to the pipes
-        dup2(server_to_shell[0], STDIN_FILENO);   // Shell's stdin
-        dup2(shell_to_server[1], STDOUT_FILENO);  // Shell's stdout
-        dup2(shell_to_server[1], STDERR_FILENO);  // Shell's stderr
+        dup2(server_to_shell[0], STDIN_FILENO);  // Shell's stdin
+        dup2(shell_to_server[1], STDOUT_FILENO); // Shell's stdout
+        dup2(shell_to_server[1], STDERR_FILENO); // Shell's stderr
 
         // **Implementing Number 10: Close unused ends in child**
         close(server_to_shell[1]); // Child doesn't write to server_to_shell
@@ -198,7 +230,9 @@ void handle_client(int client_fd) {
         execlp("/bin/bash", "bash", NULL);
         perror("Failed to execute shell");
         exit(1);
-    } else if (pid > 0) {  // Parent process (server handling client)
+    }
+    else if (pid > 0)
+    { // Parent process (server handling client)
         // **Implementing Number 10: Close unused ends in parent**
         close(server_to_shell[0]); // Parent doesn't read from server_to_shell
         close(shell_to_server[1]); // Parent doesn't write to shell_to_server
@@ -208,35 +242,48 @@ void handle_client(int client_fd) {
         char buffer[BUFFER_SIZE];
         ssize_t nbytes;
 
-        while (1) {
+        while (1)
+        {
             FD_ZERO(&read_fds);
             FD_SET(client_fd, &read_fds);
             FD_SET(shell_to_server[0], &read_fds);
 
             // Wait for data on either the client socket or the shell output
             int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-            if (activity < 0 && errno != EINTR) {
+            if (activity < 0 && errno != EINTR)
+            {
                 perror("Select error");
                 break;
             }
 
             // **Implementing Number 8: Handle partial reads/writes from client to shell**
-            if (FD_ISSET(client_fd, &read_fds)) {
+            if (FD_ISSET(client_fd, &read_fds))
+            {
                 nbytes = read(client_fd, buffer, sizeof(buffer));
-                if (nbytes <= 0) {
-                    if (nbytes == 0) {
+                if (nbytes <= 0)
+                {
+                    if (nbytes == 0)
+                    {
                         // Client disconnected
                         break;
-                    } else {
+                    }
+                    else
+                    {
                         perror("Read error from client");
                         break;
                     }
                 }
 
+                // Strip '\r' from buffer
+                ssize_t clean_nbytes = strip_cr(buffer, nbytes);
+
+                // Write cleaned data to the shell's stdin
                 ssize_t total_written = 0;
-                while (total_written < nbytes) {
-                    ssize_t bytes_written = write(server_to_shell[1], buffer + total_written, nbytes - total_written);
-                    if (bytes_written <= 0) {
+                while (total_written < clean_nbytes)
+                {
+                    ssize_t bytes_written = write(server_to_shell[1], buffer + total_written, clean_nbytes - total_written);
+                    if (bytes_written <= 0)
+                    {
                         perror("Write error to shell");
                         break;
                     }
@@ -245,22 +292,30 @@ void handle_client(int client_fd) {
             }
 
             // **Implementing Number 8: Handle partial reads/writes from shell to client**
-            if (FD_ISSET(shell_to_server[0], &read_fds)) {
+            if (FD_ISSET(shell_to_server[0], &read_fds))
+            {
                 nbytes = read(shell_to_server[0], buffer, sizeof(buffer));
-                if (nbytes <= 0) {
-                    if (nbytes == 0) {
+                if (nbytes <= 0)
+                {
+                    if (nbytes == 0)
+                    {
                         // Shell closed
                         break;
-                    } else {
+                    }
+                    else
+                    {
                         perror("Read error from shell");
                         break;
                     }
                 }
 
+                // Write shell output to the client
                 ssize_t total_written = 0;
-                while (total_written < nbytes) {
+                while (total_written < nbytes)
+                {
                     ssize_t bytes_written = write(client_fd, buffer + total_written, nbytes - total_written);
-                    if (bytes_written <= 0) {
+                    if (bytes_written <= 0)
+                    {
                         perror("Write error to client");
                         break;
                     }
@@ -273,16 +328,21 @@ void handle_client(int client_fd) {
         close(server_to_shell[1]);
         close(shell_to_server[0]);
         close(client_fd);
-    } else {
+    }
+    else
+    {
         perror("Fork failed");
         close(client_fd);
         exit(1);
     }
 }
 
+// Signal handler to reap zombie processes
 void sigchld_handler(int signum)
 {
-    // Reap all terminated child processes
+    // Save and restore errno to avoid side effects
+    int saved_errno = errno;
     while (waitpid(-1, NULL, WNOHANG) > 0)
         ;
+    errno = saved_errno;
 }
