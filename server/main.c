@@ -237,8 +237,8 @@ void handle_client(int client_fd)
         close(shell_to_server[0]); // Child doesn't read from shell_to_server
         close(client_fd);          // Child doesn't need client's socket
 
-        // Execute the shell
-        execlp("/bin/bash", "bash", NULL);
+        // Execute the shell in non-interactive mode
+        execlp("/bin/bash", "bash", "-s", "--noprofile", "--norc", NULL);
         perror("Failed to execute shell");
         exit(1);
     }
@@ -298,6 +298,13 @@ void handle_client(int client_fd)
                     write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
                     printf("Received termination command from client.\n");
                     break;
+                }
+
+                // Skip empty commands
+                if (clean_nbytes == 0)
+                {
+                    printf("Received empty command. Skipping.\n");
+                    continue;
                 }
 
                 // Write cleaned data to the shell's stdin
