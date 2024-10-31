@@ -130,19 +130,22 @@ void error(const char *msg) {
     exit(0);
 }
 
-void clientConnect(const char *hostname)
-{
-
- int sockfd, n;
+void clientConnect(const char *hostname) {
+    int sockfd, n;
     struct sockaddr_in serv_addr;
     struct hostent *server;
 
-    char buffer[255];
+    // Initialize packet
+    struct Packet packet;
+    packet.value1 = 0;
+    packet.value2 = 0;
+    memset(packet.command, 0, MAX_COMMAND_LENGTH);
 
-
+    // Create socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
-        error("Error opening socket.");
+        perror("Error opening socket.");
+        return;
     }
 
     server = gethostbyname(hostname);
@@ -152,48 +155,39 @@ void clientConnect(const char *hostname)
         return;
     }
 
-// configure server address structure
+    // Configure server address structure
     memset((char *) &serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     memcpy((char *) &serv_addr.sin_addr.s_addr, (char *) server->h_addr, server->h_length);
     serv_addr.sin_port = htons(PORT);
 
-
-
     if (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-        error("Connection failed.");
+        perror("Connection failed.");
         close(sockfd);
         return;
     }
 
-    // Enter username
-       printf("Enter username: ");
-    memset(buffer, 0, 255);
-    fgets(buffer, 255, stdin);
-    n = write(sockfd, buffer, strlen(buffer) - 1); // Send username
+    // Prompt for command
+    printf("Enter command: ");
+    fgets(packet.command, MAX_COMMAND_LENGTH, stdin);
+    packet.command[strcspn(packet.command, "\n")] = '\0'; // Remove newline
+
+    // Send packet struct
+    n = write(sockfd, &packet, sizeof(packet));
     if (n < 0) {
-        perror("Error writing username to socket");
+        perror("Error sending packet to server");
         close(sockfd);
         return;
     }
 
-    // Enter password
-    printf("Enter password: ");
-    memset(buffer, 0, 255);
-    fgets(buffer, 255, stdin);
-    n = write(sockfd, buffer, strlen(buffer) - 1); // Send password
+    // Receive server response
+    char response[255];
+    memset(response, 0, 255);
+    n = read(sockfd, response, 255);
     if (n < 0) {
-        perror("Error writing password to socket");
-        close(sockfd);
-        return;
-    }
-
-    memset(buffer, 0, 255);
-    n = read(sockfd, buffer, 255);
-    if (n < 0) {
-        perror("Error reading login response");
+        perror("Error reading server response");
     } else {
-        printf("Server: %s\n", buffer);
+        printf("Server: %s\n", response);
     }
 
     close(sockfd);
