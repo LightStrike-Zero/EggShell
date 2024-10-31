@@ -187,8 +187,8 @@ void connect_to_server(char *hostname, int port) {
     password[strcspn(password, "\n")] = '\0'; // Remove newline character
 
     // Send credentials to server
-    // Here, we assume the protocol is: send "USERNAME:<username>\nPASSWORD:<password>\n"
-    snprintf(buffer, sizeof(buffer), "USERNAME:%s\nPASSWORD:%s\n", username, password);
+    // Here, we assume the protocol is: send "<username> <password>"
+    snprintf(buffer, sizeof(buffer), "%s %s", username, password);
     send(sockfd, buffer, strlen(buffer), 0);
 
     // Wait for authentication response
