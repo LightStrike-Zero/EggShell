@@ -238,7 +238,7 @@ void handle_client(int client_fd)
         close(client_fd);          // Child doesn't need client's socket
 
         // Execute the shell in non-interactive mode
-        execlp("/bin/bash", "bash", "-s", "--noprofile", "--norc", NULL);
+        execlp("/bin/bash", "bash", "--noprofile", "--norc", NULL);
         perror("Failed to execute shell");
         exit(1);
     }

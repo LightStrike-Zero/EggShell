@@ -177,12 +177,7 @@ void connect_to_server(char *hostname, int port) {
     fflush(stdout);
     // Disable echoing for password input
     struct termios oldt, newt;
-    tcgetattr(STDIN_FILENO, &oldt); // Get current terminal attributes
-    newt = oldt;
-    newt.c_lflag &= ~ECHO; // Disable ECHO flag
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt); // Set new attributes
     fgets(password, sizeof(password), stdin);
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore old attributes
     printf("\n"); // Move to the next line
     password[strcspn(password, "\n")] = '\0'; // Remove newline character
 
