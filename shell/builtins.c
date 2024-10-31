@@ -207,6 +207,49 @@ void connect_to_server(char *hostname, int port) {
         return;
     }
 
+     // Communication loop
+    while (1) {
+        printf("Remote shell> ");
+        fflush(stdout);
+
+        // Read command from user
+        char command[1024];
+        if (fgets(command, sizeof(command), stdin) == NULL) {
+            // Handle EOF (e.g., Ctrl+D)
+            printf("\nDisconnecting...\n");
+            break;
+        }
+
+        // Remove newline character
+        command[strcspn(command, "\n")] = '\0';
+
+        // Check for exit command
+        if (strcmp(command, "exit") == 0 || strcmp(command, "logout") == 0 || strcmp(command, "quit") == 0) {
+            printf("Disconnecting...\n");
+            break;
+        }
+
+        // Send command to server
+        if (send(sockfd, command, strlen(command), 0) < 0) {
+            perror("Error sending command to server");
+            break;
+        }
+
+        // Receive response from server
+        bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_received < 0) {
+            perror("Error receiving response from server");
+            break;
+        } else if (bytes_received == 0) {
+            printf("Server closed the connection.\n");
+            break;
+        }
+
+        buffer[bytes_received] = '\0';
+        printf("%s\n", buffer);
+    }
+
+
     // Close the connection
     close(sockfd);
 }
