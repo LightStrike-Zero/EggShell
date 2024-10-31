@@ -130,66 +130,53 @@ void error(const char *msg) {
     exit(0);
 }
 
-void clientConnect(const char *hostname) {
-    int sockfd, n;
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
-
-    // Initialize packet
-    struct Packet packet;
-    packet.value1 = 0;
-    packet.value2 = 0;
-    memset(packet.command, 0, MAX_COMMAND_LENGTH);
+void connect_to_server(char *hostname, int port) {
+    int sockfd;
+    struct sockaddr_in server_addr;
 
     // Create socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
-        perror("Error opening socket.");
+        perror("Socket creation failed");
         return;
     }
 
-    server = gethostbyname(hostname);
-    if (server == NULL) {
-        fprintf(stderr, "Error, no such host\n");
+    // Set up server address struct
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+
+    // Convert hostname to IP address
+    if (inet_pton(AF_INET, hostname, &server_addr.sin_addr) <= 0) {
+        perror("Invalid address/Address not supported");
         close(sockfd);
         return;
     }
 
-    // Configure server address structure
-    memset((char *) &serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    memcpy((char *) &serv_addr.sin_addr.s_addr, (char *) server->h_addr, server->h_length);
-    serv_addr.sin_port = htons(PORT);
-
-    if (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-        perror("Connection failed.");
+    // Connect to server
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Connection failed");
         close(sockfd);
         return;
     }
 
-    // Prompt for command
-    printf("Enter command: ");
-    fgets(packet.command, MAX_COMMAND_LENGTH, stdin);
-    packet.command[strcspn(packet.command, "\n")] = '\0'; // Remove newline
+    printf("Connected to %s:%d\n", hostname, port);
 
-    // Send packet struct
-    n = write(sockfd, &packet, sizeof(packet));
-    if (n < 0) {
-        perror("Error sending packet to server");
-        close(sockfd);
-        return;
-    }
+    // Basic interaction: send a message and receive a response
+    char buffer[1024];
+    const char *message = "Hello from client\n";
+    send(sockfd, message, strlen(message), 0);
+    printf("Message sent to server.\n");
 
-    // Receive server response
-    char response[255];
-    memset(response, 0, 255);
-    n = read(sockfd, response, 255);
-    if (n < 0) {
-        perror("Error reading server response");
+    int bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_received < 0) {
+        perror("recv");
     } else {
-        printf("Server: %s\n", response);
+        buffer[bytes_received] = '\0';
+        printf("Received from server: %s\n", buffer);
     }
 
+    // Close the connection
     close(sockfd);
 }
 

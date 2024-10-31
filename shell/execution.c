@@ -53,10 +53,15 @@ void execute_command(Command *cmd) {
             fprintf(stderr, "Usage: prompt <new_prompt>\n");
         }
         return;
-
         } else if (strcmp(cmd->command_name, "connect") == 0) {
-        clientConnect("127.0.0.1");
-        return;
+        if (cmd->arg_count >= 3) {
+            char *hostname = cmd->args[1];
+            int port = atoi(cmd->args[2]);
+            connect_to_server(hostname, port);
+        } else {
+            fprintf(stderr, "Usage: connect <hostname> <port>\n");
+        }
+
     }
 
     int num_pipes = 0;
