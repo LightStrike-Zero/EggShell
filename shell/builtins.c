@@ -133,6 +133,8 @@ void error(const char *msg) {
 void connect_to_server(char *hostname, int port) {
     int sockfd;
     struct sockaddr_in server_addr;
+    char buffer[1024];
+    int bytes_received;
 
     // Create socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -162,18 +164,52 @@ void connect_to_server(char *hostname, int port) {
 
     printf("Connected to %s:%d\n", hostname, port);
 
-    // Basic interaction: send a message and receive a response
-    char buffer[1024];
-    const char *message = "Hello from client\n";
-    send(sockfd, message, strlen(message), 0);
-    printf("Message sent to server.\n");
+    // Prompt for username and password
+    char username[256];
+    char password[256];
 
-    int bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    printf("Username: ");
+    fflush(stdout);
+    fgets(username, sizeof(username), stdin);
+    username[strcspn(username, "\n")] = '\0'; // Remove newline character
+
+    printf("Password: ");
+    fflush(stdout);
+    // Disable echoing for password input
+    struct termios oldt, newt;
+    tcgetattr(STDIN_FILENO, &oldt); // Get current terminal attributes
+    newt = oldt;
+    newt.c_lflag &= ~ECHO; // Disable ECHO flag
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt); // Set new attributes
+    fgets(password, sizeof(password), stdin);
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore old attributes
+    printf("\n"); // Move to the next line
+    password[strcspn(password, "\n")] = '\0'; // Remove newline character
+
+    // Send credentials to server
+    // Here, we assume the protocol is: send "USERNAME:<username>\nPASSWORD:<password>\n"
+    snprintf(buffer, sizeof(buffer), "USERNAME:%s\nPASSWORD:%s\n", username, password);
+    send(sockfd, buffer, strlen(buffer), 0);
+
+    // Wait for authentication response
+    bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received < 0) {
         perror("recv");
+        close(sockfd);
+        return;
+    }
+
+    buffer[bytes_received] = '\0';
+    printf("Server response: %s\n", buffer);
+
+    // Check if authentication was successful
+    if (strstr(buffer, "Authentication successful") != NULL) {
+        printf("Logged in successfully.\n");
+        // Proceed with further communication if needed
     } else {
-        buffer[bytes_received] = '\0';
-        printf("Received from server: %s\n", buffer);
+        printf("Authentication failed.\n");
+        close(sockfd);
+        return;
     }
 
     // Close the connection
