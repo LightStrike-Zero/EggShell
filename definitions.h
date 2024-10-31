@@ -16,6 +16,9 @@
 #define END_PINK   "\033[0m" 
 #define PINK    "\033[1;35m"
 
+
+#define PORT 40210
+
 extern char PS1[MAX_COMMAND_LENGTH];
 
 #endif // DEFINITIONS_H

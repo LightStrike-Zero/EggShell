@@ -19,6 +19,11 @@
 #include <unistd.h>
 #include <limits.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <linux/limits.h> // check this, vs code was getting upset about not have the linux/limits
 
 void change_directory(char *path) {
@@ -119,6 +124,82 @@ void man()
            "history - Use up and down arrow keys to toggle through command history.\n"
            "exit -    Exit shell. Bye Bye.\n"END_PINK); 
 }
+
+void error(const char *msg) {
+    perror(msg);
+    exit(0);
+}
+
+void clientConnect(const char *hostname)
+{
+
+ int sockfd, n;
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+
+    char buffer[255];
+
+
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        error("Error opening socket.");
+    }
+
+    server = gethostbyname(hostname);
+    if (server == NULL) {
+        fprintf(stderr, "Error, no such host\n");
+        close(sockfd);
+        return;
+    }
+
+// configure server address structure
+    memset((char *) &serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    memcpy((char *) &serv_addr.sin_addr.s_addr, (char *) server->h_addr, server->h_length);
+    serv_addr.sin_port = htons(PORT);
+
+
+
+    if (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+        error("Connection failed.");
+        close(sockfd);
+        return;
+    }
+
+    // Enter username
+       printf("Enter username: ");
+    memset(buffer, 0, 255);
+    fgets(buffer, 255, stdin);
+    n = write(sockfd, buffer, strlen(buffer) - 1); // Send username
+    if (n < 0) {
+        perror("Error writing username to socket");
+        close(sockfd);
+        return;
+    }
+
+    // Enter password
+    printf("Enter password: ");
+    memset(buffer, 0, 255);
+    fgets(buffer, 255, stdin);
+    n = write(sockfd, buffer, strlen(buffer) - 1); // Send password
+    if (n < 0) {
+        perror("Error writing password to socket");
+        close(sockfd);
+        return;
+    }
+
+    memset(buffer, 0, 255);
+    n = read(sockfd, buffer, 255);
+    if (n < 0) {
+        perror("Error reading login response");
+    } else {
+        printf("Server: %s\n", buffer);
+    }
+
+    close(sockfd);
+}
+
+
 
 void exit_shell() {
     restore_terminal();

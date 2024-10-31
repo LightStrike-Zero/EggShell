@@ -4,6 +4,7 @@
 void change_directory(char *path);
 void cd(char *path);
 void pwd();
+void clientConnect(const char *hostname)
 void man();
 void change_hostname();
 void exit_shell();
