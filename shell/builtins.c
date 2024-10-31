@@ -193,8 +193,6 @@ void clientConnect(const char *hostname) {
     close(sockfd);
 }
 
-
-
 void exit_shell() {
     restore_terminal();
     printf("Exiting shell...\n");
