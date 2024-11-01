@@ -7,9 +7,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>    // Corrected from <cerrno>
-#include <signal.h>   // Added for signal handling
-#include <sys/wait.h> // Added for waitpid and WNOHANG
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <pty.h>
+#include <utmp.h>
+#include <termios.h>
 
 #define BUFFER_SIZE 1024
 
@@ -18,7 +21,7 @@
 #define PORT 40210
 #define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
-float version = 0.24;
+float version = 0.25;
 
 struct ClientInfo
 {
@@ -41,7 +44,6 @@ int authenticate(int client_fd);
 void handle_client(int client_fd);
 ssize_t strip_cr(char *buffer, ssize_t nbytes);
 void sigchld_handler(int signum);
-int contains_marker(const char *buffer, size_t len);
 
 int main()
 {
@@ -163,7 +165,7 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes)
         }
     }
     buffer[j] = '\0';                           // Null-terminate for safe printing
-    printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
+    // printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
     return j;
 }
 
@@ -257,115 +259,130 @@ void handle_client(int client_fd)
 
         fd_set read_fds;
         int max_fd = (client_fd > shell_to_server[0]) ? client_fd : shell_to_server[0];
-        char buffer[BUFFER_SIZE];
-        ssize_t nbytes; // **Add this line to declare nbytes**
+        char client_buffer[BUFFER_SIZE];
+        char shell_buffer[BUFFER_SIZE];
+        ssize_t nbytes;
+
+        int command_in_progress = 0;
+        size_t shell_buffer_len = 0;
 
         while (1)
         {
-            // Read command from client
-            nbytes = read(client_fd, buffer, sizeof(buffer) - 1);
-            if (nbytes <= 0)
-            {
-                // Handle disconnection or error
-                break;
-            }
-            buffer[nbytes] = '\0'; // Null-terminate
+            FD_ZERO(&read_fds);
 
-            // Strip '\r' from buffer
-            ssize_t clean_nbytes = strip_cr(buffer, nbytes);
-            buffer[clean_nbytes] = '\0'; // Ensure null-termination
-
-            // Check for termination command
-            if (strcmp(buffer, "exit\n") == 0 || strcmp(buffer, "quit\n") == 0)
+            if (!command_in_progress)
             {
-                write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
-                printf("Received termination command from client.\n");
-                break;
+                FD_SET(client_fd, &read_fds);
             }
 
-            // Append the marker to the command
-            const char *marker = "; echo __COMMAND_COMPLETED__\n";
-            char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
-            snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", buffer, marker);
-
-            // Write the modified command to the shell's stdin
-            ssize_t total_written = 0;
-            ssize_t command_len = strlen(command_with_marker);
-            while (total_written < command_len)
+            if (command_in_progress)
             {
-                ssize_t bytes_written = write(server_to_shell[1], command_with_marker + total_written, command_len - total_written);
-                if (bytes_written <= 0)
-                {
-                    perror("Write error to shell");
-                    break;
-                }
-                total_written += bytes_written;
-            }
-
-            // Read from the shell and send output to the client
-            char shell_buffer[BUFFER_SIZE];
-            size_t shell_buffer_len = 0;
-            int command_completed = 0;
-
-            while (!command_completed)
-            {
-                FD_ZERO(&read_fds);
                 FD_SET(shell_to_server[0], &read_fds);
+            }
 
-                int activity = select(shell_to_server[0] + 1, &read_fds, NULL, NULL, NULL);
-                if (activity < 0 && errno != EINTR)
+            int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+            if (activity < 0 && errno != EINTR)
+            {
+                perror("Select error");
+                break;
+            }
+
+            // Data from client to shell
+            if (FD_ISSET(client_fd, &read_fds))
+            {
+                nbytes = read(client_fd, client_buffer, sizeof(client_buffer) - 1);
+                if (nbytes <= 0)
                 {
-                    perror("Select error");
+                    // Handle client disconnection or error
+                    break;
+                }
+                client_buffer[nbytes] = '\0'; // Null-terminate
+
+                // Strip '\r' from buffer
+                ssize_t clean_nbytes = strip_cr(client_buffer, nbytes);
+                client_buffer[clean_nbytes] = '\0'; // Ensure null-termination
+
+                // Check for termination command
+                if (strcmp(client_buffer, "exit\n") == 0 || strcmp(client_buffer, "quit\n") == 0)
+                {
+                    write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
+                    printf("Received termination command from client.\n");
                     break;
                 }
 
-                if (FD_ISSET(shell_to_server[0], &read_fds))
+                // Append the marker to the command
+                const char *marker = "; echo __COMMAND_COMPLETED__\n";
+                char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
+                snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", client_buffer, marker);
+
+                // Write the modified command to the shell's stdin
+                ssize_t total_written = 0;
+                ssize_t command_len = strlen(command_with_marker);
+                while (total_written < command_len)
                 {
-                    // Read data from the shell
-                    nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
-                    if (nbytes <= 0)
+                    ssize_t bytes_written = write(server_to_shell[1], command_with_marker + total_written, command_len - total_written);
+                    if (bytes_written <= 0)
                     {
-                        // Handle shell termination or error
+                        perror("Write error to shell");
                         break;
                     }
+                    total_written += bytes_written;
+                }
 
-                    shell_buffer_len += nbytes;
-                    shell_buffer[shell_buffer_len] = '\0';
+                command_in_progress = 1;
+                shell_buffer_len = 0; // Reset shell buffer
+            }
 
-                    // Send data to client
-                    ssize_t total_written = 0;
-                    size_t data_to_write = shell_buffer_len;
+            // Data from shell to client
+            if (command_in_progress && FD_ISSET(shell_to_server[0], &read_fds))
+            {
+                nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
+                if (nbytes <= 0)
+                {
+                    // Handle shell termination or error
+                    break;
+                }
 
-                    // Optionally remove the marker from the output sent to the client
-                    char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
-                    if (marker_position != NULL)
+                shell_buffer_len += nbytes;
+                shell_buffer[shell_buffer_len] = '\0';
+
+                // Check for the completion marker
+                char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
+                size_t data_to_write = shell_buffer_len;
+
+                if (marker_position != NULL)
+                {
+                    data_to_write = marker_position - shell_buffer;
+                    command_in_progress = 0; // Command completed
+
+                    // Handle any remaining data after the marker
+                    size_t remaining_data = shell_buffer_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
+                    if (remaining_data > 0)
                     {
-                        command_completed = 1;
-                        data_to_write = marker_position - shell_buffer;
-                    }
-
-                    while (total_written < data_to_write)
-                    {
-                        ssize_t bytes_written = write(client_fd, shell_buffer + total_written, data_to_write - total_written);
-                        if (bytes_written <= 0)
-                        {
-                            perror("Write error to client");
-                            break;
-                        }
-                        total_written += bytes_written;
-                    }
-
-                    // If the marker was found, handle any remaining data
-                    if (command_completed && (shell_buffer_len > data_to_write + strlen(COMMAND_COMPLETION_MARKER)))
-                    {
-                        size_t remaining_data = shell_buffer_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
-                        memmove(shell_buffer, shell_buffer + data_to_write + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
+                        memmove(shell_buffer, marker_position + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
                         shell_buffer_len = remaining_data;
                     }
                     else
                     {
-                        shell_buffer_len = 0; // Reset buffer for next read
+                        shell_buffer_len = 0;
                     }
+                }
+                else
+                {
+                    shell_buffer_len = 0; // Reset buffer for next read
+                }
+
+                // Send data to client
+                ssize_t total_written = 0;
+                while (total_written < data_to_write)
+                {
+                    ssize_t bytes_written = write(client_fd, shell_buffer + total_written, data_to_write - total_written);
+                    if (bytes_written <= 0)
+                    {
+                        perror("Write error to client");
+                        break;
+                    }
+                    total_written += bytes_written;
                 }
             }
         }
@@ -391,24 +408,4 @@ void sigchld_handler(int signum)
     while (waitpid(-1, NULL, WNOHANG) > 0)
         ;
     errno = saved_errno;
-}
-
-int contains_marker(const char *buffer, size_t len)
-{
-    static char marker[] = COMMAND_COMPLETION_MARKER;
-    size_t marker_len = strlen(marker);
-
-    if (len < marker_len)
-    {
-        return 0;
-    }
-
-    for (size_t i = 0; i <= len - marker_len; i++)
-    {
-        if (strncmp(buffer + i, marker, marker_len) == 0)
-        {
-            return 1;
-        }
-    }
-    return 0;
 }
