@@ -7,20 +7,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>    // Corrected from <cerrno>
-#include <signal.h>   // Added for signal handling
-#include <sys/wait.h> // Added for waitpid and WNOHANG
-#include <fcntl.h>    // Added for file descriptor flags
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define BUFFER_SIZE 1024
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
-#define TIMEOUT_SEC 0
-#define TIMEOUT_USEC 100000  // 100 ms timeout
 #define CUSTOM_SHELL_PATH "../shell/egg_shell"
 
-#define DEBUG 1  // Set to 1 to enable debug output, 0 to disable
+#define DEBUG 1
 
 #define DEBUG_PRINT(fmt, ...) \
     do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
@@ -131,7 +129,6 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes) {
         }
     }
     buffer[j] = '\0';
-    printf("After strip_cr: \"%s\"\n", buffer);
     return j;
 }
 
@@ -147,19 +144,15 @@ int authenticate(int client_fd) {
     ssize_t clean_nbytes = strip_cr(buffer, n);
     buffer[clean_nbytes] = '\0';
 
-    printf("Authentication input after strip_cr: \"%s\"\n", buffer);
-
     char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
     sscanf(buffer, "%29s %11s", received_username, received_password);
 
     if (strcmp(received_username, userTable.username) == 0 &&
         strcmp(received_password, userTable.password) == 0) {
         write(client_fd, "Authentication successful\n", strlen("Authentication successful\n"));
-        printf("User \"%s\" authenticated successfully.\n", received_username);
         return 1;
     } else {
         write(client_fd, "Authentication failed\n", strlen("Authentication failed\n"));
-        printf("User \"%s\" failed to authenticate.\n", received_username);
         return 0;
     }
 }
@@ -168,7 +161,6 @@ void handle_client(int client_fd) {
     int shell_to_server[2];  // Pipe from shell stdout to server
     int server_to_shell[2];  // Pipe from server to shell stdin
 
-    // Create pipes
     if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
         perror("pipe failed");
         close(client_fd);
@@ -177,69 +169,54 @@ void handle_client(int client_fd) {
 
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process: execute egg_shell with pipes
         dup2(server_to_shell[0], STDIN_FILENO);  // Read from server to shell pipe as stdin
         dup2(shell_to_server[1], STDOUT_FILENO); // Write to shell to server pipe as stdout
         dup2(shell_to_server[1], STDERR_FILENO); // Redirect stderr to the same pipe for consistency
 
-        close(shell_to_server[0]); // Close unused ends of pipes
+        close(shell_to_server[0]);
         close(server_to_shell[1]);
 
         execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
         perror("execl failed");
         exit(1);
     } else if (pid > 0) {
-        // Parent process: server communicating with client and egg_shell
-        close(shell_to_server[1]); // Close unused ends of pipes
+        close(shell_to_server[1]);
         close(server_to_shell[0]);
 
         char buffer[BUFFER_SIZE];
         ssize_t bytes_read;
-        char output_buffer[BUFFER_SIZE * 4];  // To accumulate output for each command
+        char output_buffer[BUFFER_SIZE * 4];  // Accumulate output for each command
         int output_len = 0;
 
         while (1) {
-            // Read command from client
             bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
             if (bytes_read <= 0) {
                 DEBUG_PRINT("Client disconnected or read error for client fd: %d\n", client_fd);
-                break;  // Client disconnected
+                break;
             }
             buffer[bytes_read] = '\0';
-            DEBUG_PRINT("Received command from client fd %d: %s\n", client_fd, buffer);
 
-            // Send command to egg_shell via pipe
             write(server_to_shell[1], buffer, bytes_read);
-            write(server_to_shell[1], "\n", 1);  // Ensure newline to execute command
+            write(server_to_shell[1], "\n", 1);
 
-            // Accumulate output until the `%` prompt is detected
             output_len = 0;
             while ((bytes_read = read(shell_to_server[0], buffer, sizeof(buffer) - 1)) > 0) {
                 buffer[bytes_read] = '\0';
-
-                // Append to output buffer
                 strncpy(output_buffer + output_len, buffer, sizeof(output_buffer) - output_len - 1);
                 output_len += bytes_read;
                 output_buffer[output_len] = '\0';
 
-                DEBUG_PRINT("Received chunk from shell for client fd %d: %s\n", client_fd, buffer);
-
-                // Check if the output contains the prompt "%"
                 if (strstr(output_buffer, "%") != NULL) {
                     DEBUG_PRINT("End of command output detected for client fd %d\n", client_fd);
                     break;
                 }
             }
 
-            // Send accumulated output to client
             write(client_fd, output_buffer, output_len);
-            DEBUG_PRINT("Output sent to client fd %d: %s\n", client_fd, output_buffer);
 
-            // Reset output buffer for the next command
             memset(output_buffer, 0, sizeof(output_buffer));
         }
 
-        // Clean up: close pipes and client connection
         close(client_fd);
         close(shell_to_server[0]);
         close(server_to_shell[1]);
@@ -254,6 +231,7 @@ void handle_client(int client_fd) {
         close(server_to_shell[1]);
     }
 }
+
 void sigchld_handler(int signum) {
     int saved_errno = errno;
     while (waitpid(-1, NULL, WNOHANG) > 0);

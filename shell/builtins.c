@@ -136,26 +136,22 @@ void connect_to_server(char *hostname, int port) {
     char buffer[1024];
     int bytes_received;
 
-    // Create socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
         perror("Socket creation failed");
         return;
     }
 
-    // Set up server address struct
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
 
-    // Convert hostname to IP address
     if (inet_pton(AF_INET, hostname, &server_addr.sin_addr) <= 0) {
         perror("Invalid address/Address not supported");
         close(sockfd);
         return;
     }
 
-    // Connect to server
     if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Connection failed");
         close(sockfd);
@@ -164,29 +160,23 @@ void connect_to_server(char *hostname, int port) {
 
     printf("Connected to %s:%d\n", hostname, port);
 
-    // Prompt for username and password
     char username[256];
     char password[256];
 
     printf("Username: ");
     fflush(stdout);
     fgets(username, sizeof(username), stdin);
-    username[strcspn(username, "\n")] = '\0'; // Remove newline character
+    username[strcspn(username, "\n")] = '\0';
 
     printf("Password: ");
     fflush(stdout);
-    // Disable echoing for password input
-    struct termios oldt, newt;
     fgets(password, sizeof(password), stdin);
-    printf("\n"); // Move to the next line
-    password[strcspn(password, "\n")] = '\0'; // Remove newline character
+    printf("\n");
+    password[strcspn(password, "\n")] = '\0';
 
-    // Send credentials to server
-    // Here, we assume the protocol is: send "<username> <password>"
     snprintf(buffer, sizeof(buffer), "%s %s", username, password);
     send(sockfd, buffer, strlen(buffer), 0);
 
-    // Wait for authentication response
     bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received < 0) {
         perror("recv");
@@ -197,60 +187,47 @@ void connect_to_server(char *hostname, int port) {
     buffer[bytes_received] = '\0';
     printf("Server response: %s\n", buffer);
 
-    // Check if authentication was successful
     if (strstr(buffer, "Authentication successful") != NULL) {
         printf("Logged in successfully.\n");
-        // Proceed with further communication if needed
     } else {
         printf("Authentication failed.\n");
         close(sockfd);
         return;
     }
 
-     // Communication loop
     while (1) {
         printf("Remote shell> ");
         fflush(stdout);
 
-        // Read command from user
         char command[1024];
         if (fgets(command, sizeof(command), stdin) == NULL) {
-            // Handle EOF (e.g., Ctrl+D)
             printf("\nDisconnecting...\n");
             break;
         }
 
-        // Remove newline character
         command[strcspn(command, "\n")] = '\0';
 
-        // Check for exit command
         if (strcmp(command, "exit") == 0 || strcmp(command, "logout") == 0 || strcmp(command, "quit") == 0) {
             printf("Disconnecting...\n");
             break;
         }
 
-        // Send command to server
         if (send(sockfd, command, strlen(command), 0) < 0) {
             perror("Error sending command to server");
             break;
         }
 
-        // Receive response from server
-        bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_received < 0) {
-            perror("Error receiving response from server");
-            break;
-        } else if (bytes_received == 0) {
-            printf("Server closed the connection.\n");
-            break;
+        while ((bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0)) > 0) {
+            buffer[bytes_received] = '\0';
+            printf("%s", buffer);
+            if (strstr(buffer, "%")) {
+                break;
+            }
         }
 
-        buffer[bytes_received] = '\0';
-        printf("%s\n", buffer);
+        send(sockfd, "READY", 5, 0);
     }
 
-
-    // Close the connection
     close(sockfd);
 }
 
