@@ -16,7 +16,8 @@
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
-
+#define TIMEOUT_SEC 0
+#define TIMEOUT_USEC 100000  // 100 ms timeout
 #define CUSTOM_SHELL_PATH "../shell/egg_shell"
 
 #define DEBUG 1  // Set to 1 to enable debug output, 0 to disable
@@ -182,7 +183,7 @@ void handle_client(int client_fd) {
 
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process: Set up egg_shell
+        // Child process: execute egg_shell
         DEBUG_PRINT("Forked child process for client fd: %d\n", client_fd);
 
         // Redirect stdin and stdout to the pipes
@@ -190,37 +191,25 @@ void handle_client(int client_fd) {
         dup2(out_pipe[1], STDOUT_FILENO);
         dup2(out_pipe[1], STDERR_FILENO);
 
-        // Close unused pipe ends
+        // Close unused pipe ends in the child
         close(in_pipe[1]);
         close(out_pipe[0]);
-        close(client_fd);  // Child does not need access to the client socket
+        close(client_fd);
 
         DEBUG_PRINT("Executing egg_shell for client fd: %d\n", client_fd);
-        // Execute the custom shell
         execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
         perror("execl failed");
         exit(1);
     } else if (pid > 0) {
-        // Parent process: Communicate with client and child shell
-        DEBUG_PRINT("Parent process communicating with child (pid %d) for client fd: %d\n", pid, client_fd);
-
-        // Close unused pipe ends in the parent
+        // Parent process: communicate with client and shell via pipes
         close(in_pipe[0]);
         close(out_pipe[1]);
 
         char buffer[BUFFER_SIZE];
         ssize_t bytes_read;
-
-        // Initial read to capture welcome message or any startup text from egg_shell
-        bytes_read = read(out_pipe[0], buffer, sizeof(buffer) - 1);
-        if (bytes_read > 0) {
-            buffer[bytes_read] = '\0';
-            DEBUG_PRINT("Initial output from egg_shell for client fd %d: %s\n", client_fd, buffer);
-            write(client_fd, buffer, bytes_read);  // Send welcome message to client
-        }
-
-        // Main communication loop with select for real-time sync
         fd_set read_fds;
+        struct timeval timeout;
+
         while (1) {
             FD_ZERO(&read_fds);
             FD_SET(client_fd, &read_fds);
@@ -235,7 +224,7 @@ void handle_client(int client_fd) {
                 break;
             }
 
-            // Check if there's data from the client
+            // Check if there’s data from the client (command input)
             if (FD_ISSET(client_fd, &read_fds)) {
                 bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
                 if (bytes_read <= 0) {
@@ -245,37 +234,44 @@ void handle_client(int client_fd) {
                 buffer[bytes_read] = '\0';
                 DEBUG_PRINT("Received command from client fd %d: %s\n", client_fd, buffer);
 
-                // Ensure command is newline-terminated before sending to shell
-                strncat(buffer, "\n", sizeof(buffer) - strlen(buffer) - 1);
-                
                 // Send command to egg_shell
-                ssize_t bytes_written = write(in_pipe[1], buffer, strlen(buffer));
-                if (bytes_written != strlen(buffer)) {
-                    perror("write to shell failed");
-                    DEBUG_PRINT("Failed to write command to shell for client fd: %d\n", client_fd);
-                    break;
-                }
+                strncat(buffer, "\n", sizeof(buffer) - strlen(buffer) - 1);
+                write(in_pipe[1], buffer, strlen(buffer));
                 DEBUG_PRINT("Command sent to shell for client fd %d: %s\n", client_fd, buffer);
-            }
 
-            // Check if there's output from the shell
-            if (FD_ISSET(out_pipe[0], &read_fds)) {
-                bytes_read = read(out_pipe[0], buffer, sizeof(buffer) - 1);
-                if (bytes_read <= 0) {
-                    DEBUG_PRINT("Shell process closed output for client fd: %d\n", client_fd);
-                    break;  // Shell process finished
-                }
-                buffer[bytes_read] = '\0';
-                DEBUG_PRINT("Received output from shell for client fd %d: %s\n", client_fd, buffer);
+                // Begin reading output in chunks
+                while (1) {
+                    // Set a short timeout for each read loop
+                    timeout.tv_sec = TIMEOUT_SEC;
+                    timeout.tv_usec = TIMEOUT_USEC;
 
-                // Send output back to client
-                ssize_t client_written = write(client_fd, buffer, bytes_read);
-                if (client_written != bytes_read) {
-                    perror("write to client failed");
-                    DEBUG_PRINT("Failed to write shell output to client fd: %d\n", client_fd);
-                    break;
+                    FD_ZERO(&read_fds);
+                    FD_SET(out_pipe[0], &read_fds);
+
+                    int ready = select(out_pipe[0] + 1, &read_fds, NULL, NULL, &timeout);
+
+                    if (ready < 0) {
+                        perror("select");
+                        break;
+                    } else if (ready == 0) {
+                        // Timeout reached, no more data to read
+                        // DEBUG_PRINT("Timeout reached, no more data from shell\n");
+                        break;
+                    }
+
+                    // Read output from egg_shell
+                    bytes_read = read(out_pipe[0], buffer, sizeof(buffer) - 1);
+                    if (bytes_read <= 0) {
+                        DEBUG_PRINT("Shell process closed output for client fd: %d\n", client_fd);
+                        break;  // Shell process finished
+                    }
+                    buffer[bytes_read] = '\0';
+                    DEBUG_PRINT("Received chunk from shell for client fd %d: %s\n", client_fd, buffer);
+
+                    // Send output chunk directly to the client
+                    write(client_fd, buffer, bytes_read);
+                    DEBUG_PRINT("Output chunk sent to client fd %d\n", client_fd);
                 }
-                DEBUG_PRINT("Output sent to client fd %d: %s\n", client_fd, buffer);
             }
         }
 
@@ -283,13 +279,10 @@ void handle_client(int client_fd) {
         close(in_pipe[1]);
         close(out_pipe[0]);
         close(client_fd);
-
-        // Wait for the child process to finish
-        waitpid(pid, NULL, 0);
+        waitpid(pid, NULL, 0);  // Wait for the child process to finish
         DEBUG_PRINT("Closed connection and cleaned up for client fd: %d\n", client_fd);
     } else {
         perror("fork");
-        DEBUG_PRINT("Fork failed for client fd: %d\n", client_fd);
         close(in_pipe[0]);
         close(in_pipe[1]);
         close(out_pipe[0]);
@@ -297,7 +290,6 @@ void handle_client(int client_fd) {
         close(client_fd);
     }
 }
-
 void sigchld_handler(int signum) {
     int saved_errno = errno;
     while (waitpid(-1, NULL, WNOHANG) > 0);
