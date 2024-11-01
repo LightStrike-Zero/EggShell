@@ -7,31 +7,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>    // Corrected from <cerrno>
-#include <signal.h>   // Added for signal handling
-#include <sys/wait.h> // Added for waitpid and WNOHANG
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define BUFFER_SIZE 1024
-
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
 #define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
-struct ClientInfo
-{
+struct ClientInfo {
     int client_socket;
     pid_t pid;
 };
 
-struct UserTable
-{
+struct UserTable {
     char username[USERNAME_LENGTH];
     char password[PASSWORD_LENGTH];
 } userTable = {"test", "test"};
 
-struct ClientInfo client_list[100]; // Fixed size for simplicity
-int client_count = 0;               // Track the number of clients
+struct ClientInfo client_list[100];
+int client_count = 0;
 
 // Function prototypes
 int setup_server_socket(int port);
@@ -41,16 +38,14 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes);
 void sigchld_handler(int signum);
 int contains_marker(const char *buffer, size_t len);
 
-int main()
-{
+int main() {
     // Set up the SIGCHLD handler to reap zombie processes
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART; // Restart interrupted system calls
+    sa.sa_flags = SA_RESTART;
 
-    if (sigaction(SIGCHLD, &sa, NULL) == -1)
-    {
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
         perror("sigaction");
         exit(1);
     }
@@ -59,63 +54,50 @@ int main()
     int server_fd = setup_server_socket(PORT);
 
     // Main server loop
-    while (1)
-    {
+    while (1) {
         struct sockaddr_in cli_addr;
         socklen_t clilen = sizeof(cli_addr);
 
         // Step 2: Accept a new client connection
         int client_fd = accept(server_fd, (struct sockaddr *)&cli_addr, &clilen);
-        if (client_fd < 0)
-        {
+        if (client_fd < 0) {
             perror("Error on accept");
             continue;
         }
 
         // Step 3: Fork a new process for each client
         pid_t pid = fork();
-        if (pid == 0)
-        {                             // Child process
-            close(server_fd);         // Close unused server socket in child
-            handle_client(client_fd); // Handle the client
-            exit(0);                  // End child process after handling client
-        }
-        else if (pid > 0)
-        {
-            if (client_count < 100)
-            {
+        if (pid == 0) { // Child process
+            close(server_fd);
+            handle_client(client_fd);
+            exit(0);
+        } else if (pid > 0) {
+            if (client_count < 100) {
                 client_list[client_count].client_socket = client_fd;
                 client_list[client_count].pid = pid;
                 client_count++;
-            }
-            else
-            {
+            } else {
                 perror("Max client limit reached.");
-                close(client_fd); // Close the new client socket if limit reached
+                close(client_fd);
             }
-            close(client_fd); // Close unused client socket in parent
-        }
-        else
-        {
+            close(client_fd);
+        } else {
             perror("Fork failed");
             close(client_fd);
         }
     }
 
-    // Cleanup
     close(server_fd);
     return 0;
 }
 
-int setup_server_socket(int port)
-{
+int setup_server_socket(int port) {
     int sockfd;
     struct sockaddr_in serv_addr;
 
     // Open socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
-    {
+    if (sockfd < 0) {
         perror("Error opening socket");
         exit(1);
     }
@@ -127,16 +109,14 @@ int setup_server_socket(int port)
     serv_addr.sin_port = htons(port);
 
     // Bind socket to port
-    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-    {
+    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("Error on binding");
         close(sockfd);
         exit(1);
     }
 
     // Start listening on the socket
-    if (listen(sockfd, 5) < 0)
-    {
+    if (listen(sockfd, 5) < 0) {
         perror("Error on listen");
         close(sockfd);
         exit(1);
@@ -144,75 +124,60 @@ int setup_server_socket(int port)
 
     printf("Server listening on port %d\n", port);
 
-    // Return the server socket descriptor to main
     return sockfd;
 }
 
-ssize_t strip_cr(char *buffer, ssize_t nbytes)
-{
+ssize_t strip_cr(char *buffer, ssize_t nbytes) {
     ssize_t j = 0;
-    for (ssize_t i = 0; i < nbytes; i++)
-    {
-        if (buffer[i] != '\r')
-        {
+    for (ssize_t i = 0; i < nbytes; i++) {
+        if (buffer[i] != '\r') {
             buffer[j++] = buffer[i];
         }
     }
-    buffer[j] = '\0';                           // Null-terminate for safe printing
-    printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
+    buffer[j] = '\0';
+    printf("After strip_cr: \"%s\"\n", buffer);
     return j;
 }
 
-int authenticate(int client_fd)
-{
-    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 1];  // Additional byte for separating username and password
-    int n = read(client_fd, buffer, sizeof(buffer) - 1); // Read into buffer
-    if (n <= 0)
-    {
+int authenticate(int client_fd) {
+    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 1];
+    int n = read(client_fd, buffer, sizeof(buffer) - 1);
+    if (n <= 0) {
         perror("Error reading from client");
         return 0;
     }
 
-    buffer[n] = '\0'; // Null-terminate to ensure it’s a proper string
+    buffer[n] = '\0';
 
-    // Strip '\r' from buffer
     ssize_t clean_nbytes = strip_cr(buffer, n);
-    buffer[clean_nbytes] = '\0'; // Ensure null-termination after stripping
+    buffer[clean_nbytes] = '\0';
 
-    // Debugging: Print the stripped input
     printf("Authentication input after strip_cr: \"%s\"\n", buffer);
 
-    // Parse username and password from buffer
     char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
     sscanf(buffer, "%29s %11s", received_username, received_password);
 
-    // Check against the user table
     if (strcmp(received_username, userTable.username) == 0 &&
-        strcmp(received_password, userTable.password) == 0)
-    {
+        strcmp(received_password, userTable.password) == 0) {
         write(client_fd, "Authentication successful\n", strlen("Authentication successful\n"));
-        printf("User \"%s\" authenticated successfully.\n", received_username); // Debugging
-        return 1;                                                               // Authentication success
-    }
-    else
-    {
+        printf("User \"%s\" authenticated successfully.\n", received_username);
+        return 1;
+    } else {
         write(client_fd, "Authentication failed\n", strlen("Authentication failed\n"));
-        printf("User \"%s\" failed to authenticate.\n", received_username); // Debugging
-        return 0;                                                           // Authentication failed
+        printf("User \"%s\" failed to authenticate.\n", received_username);
+        return 0;
     }
 }
 
 void handle_client(int client_fd) {
-    // Authenticate the client first
     if (!authenticate(client_fd)) {
         close(client_fd);
-        exit(0); // Terminate child process if authentication fails
+        exit(0);
     }
 
-    int shell_to_server[2]; // Pipe from shell's stdout/stderr to server
-    int server_to_shell[2]; // Pipe from server to shell's stdin
+    int shell_to_server[2];
+    int server_to_shell[2];
 
-    // Create pipes for communication with the shell
     if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
         perror("Pipe creation failed");
         close(client_fd);
@@ -221,7 +186,6 @@ void handle_client(int client_fd) {
 
     pid_t pid = fork();
     if (pid == 0) { // Child process (shell)
-        // Redirect shell's stdin, stdout, and stderr to the pipes
         if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
             dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
             dup2(shell_to_server[1], STDERR_FILENO) == -1) {
@@ -229,50 +193,54 @@ void handle_client(int client_fd) {
             exit(1);
         }
 
-        close(server_to_shell[1]); // Child doesn't write to server_to_shell
-        close(shell_to_server[0]); // Child doesn't read from shell_to_server
-        close(client_fd);          // Child doesn't need client's socket
+        close(server_to_shell[1]);
+        close(shell_to_server[0]);
+        close(client_fd);
 
         const char *shell_path = "../shell/egg_shell";
+        printf("Attempting to execute shell at path: %s\n", shell_path);
 
         execlp(shell_path, "egg_shell", NULL);
-        perror("Failed to execute shell");
+        
+        // If execlp returns, it means there was an error
+        perror("Failed to execute custom shell");
         exit(1);
     } else if (pid > 0) { // Parent process (server handling client)
-        close(server_to_shell[0]); // Parent doesn't read from server_to_shell
-        close(shell_to_server[1]); // Parent doesn't write to shell_to_server
+        close(server_to_shell[0]);
+        close(shell_to_server[1]);
 
         fd_set read_fds;
         int max_fd = (client_fd > shell_to_server[0]) ? client_fd : shell_to_server[0];
         char buffer[BUFFER_SIZE];
-        ssize_t nbytes; // **Add this line to declare nbytes**
+        ssize_t nbytes;
 
         while (1) {
-            // Read command from client
             nbytes = read(client_fd, buffer, sizeof(buffer) - 1);
             if (nbytes <= 0) {
-                // Handle disconnection or error
+                if (nbytes < 0) {
+                    perror("Error reading from client");
+                } else {
+                    printf("Client disconnected.\n");
+                }
                 break;
             }
-            buffer[nbytes] = '\0'; // Null-terminate
+            buffer[nbytes] = '\0';
 
-            // Strip '\r' from buffer
             ssize_t clean_nbytes = strip_cr(buffer, nbytes);
-            buffer[clean_nbytes] = '\0'; // Ensure null-termination
+            buffer[clean_nbytes] = '\0';
 
-            // Check for termination command
-            if (strcmp(buffer, "exit\n") == 0 || strcmp(buffer, "quit\n") == 0) {
+            printf("Command received from client: \"%s\"\n", buffer);
+
+            if (strcmp(buffer, "exit") == 0 || strcmp(buffer, "quit") == 0) {
                 write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
                 printf("Received termination command from client.\n");
                 break;
             }
 
-            // Append the marker to the command
             const char *marker = "; echo __COMMAND_COMPLETED__\n";
-            char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
+            char command_with_marker[BUFFER_SIZE + 50];
             snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", buffer, marker);
 
-            // Write the modified command to the shell's stdin
             ssize_t total_written = 0;
             ssize_t command_len = strlen(command_with_marker);
             while (total_written < command_len) {
@@ -284,7 +252,6 @@ void handle_client(int client_fd) {
                 total_written += bytes_written;
             }
 
-            // Read from the shell and send output to the client
             char shell_buffer[BUFFER_SIZE];
             size_t shell_buffer_len = 0;
             int command_completed = 0;
@@ -300,21 +267,22 @@ void handle_client(int client_fd) {
                 }
 
                 if (FD_ISSET(shell_to_server[0], &read_fds)) {
-                    // Read data from the shell
                     nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
                     if (nbytes <= 0) {
-                        // Handle shell termination or error
+                        if (nbytes < 0) {
+                            perror("Error reading from shell");
+                        } else {
+                            printf("Shell process terminated.\n");
+                        }
                         break;
                     }
 
                     shell_buffer_len += nbytes;
                     shell_buffer[shell_buffer_len] = '\0';
 
-                    // Send data to client
                     ssize_t total_written = 0;
                     size_t data_to_write = shell_buffer_len;
 
-                    // Optionally remove the marker from the output sent to the client
                     char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
                     if (marker_position != NULL) {
                         command_completed = 1;
@@ -330,19 +298,17 @@ void handle_client(int client_fd) {
                         total_written += bytes_written;
                     }
 
-                    // If the marker was found, handle any remaining data
                     if (command_completed && (shell_buffer_len > data_to_write + strlen(COMMAND_COMPLETION_MARKER))) {
                         size_t remaining_data = shell_buffer_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
                         memmove(shell_buffer, shell_buffer + data_to_write + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
                         shell_buffer_len = remaining_data;
                     } else {
-                        shell_buffer_len = 0; // Reset buffer for next read
+                        shell_buffer_len = 0;
                     }
                 }
             }
         }
 
-        // Close all open descriptors
         close(server_to_shell[1]);
         close(shell_to_server[0]);
         close(client_fd);
@@ -353,14 +319,9 @@ void handle_client(int client_fd) {
     }
 }
 
-
-// Signal handler to reap zombie processes
-void sigchld_handler(int signum)
-{
-    // Save and restore errno to avoid side effects
+void sigchld_handler(int signum) {
     int saved_errno = errno;
-    while (waitpid(-1, NULL, WNOHANG) > 0)
-        ;
+    while (waitpid(-1, NULL, WNOHANG) > 0);
     errno = saved_errno;
 }
 
