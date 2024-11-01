@@ -211,9 +211,9 @@ void handle_client(int client_fd) {
         struct timeval timeout;
 
         while (1) {
+            // Wait for command input from the client
             FD_ZERO(&read_fds);
             FD_SET(client_fd, &read_fds);
-            FD_SET(out_pipe[0], &read_fds);
 
             int max_fd = (client_fd > out_pipe[0]) ? client_fd : out_pipe[0];
             int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
@@ -239,9 +239,10 @@ void handle_client(int client_fd) {
                 write(in_pipe[1], buffer, strlen(buffer));
                 DEBUG_PRINT("Command sent to shell for client fd %d: %s\n", client_fd, buffer);
 
-                // Begin reading output in chunks
-                while (1) {
-                    // Set a short timeout for each read loop
+                // Start reading the output in chunks with a longer timeout
+                int output_complete = 0;
+                while (!output_complete) {
+                    // Set a longer timeout for this loop
                     timeout.tv_sec = TIMEOUT_SEC;
                     timeout.tv_usec = TIMEOUT_USEC;
 
@@ -254,8 +255,9 @@ void handle_client(int client_fd) {
                         perror("select");
                         break;
                     } else if (ready == 0) {
-                        // Timeout reached, no more data to read
-                        // DEBUG_PRINT("Timeout reached, no more data from shell\n");
+                        // Timeout reached with no more data, assume output is complete
+                        // DEBUG_PRINT("Extended timeout reached, assuming command output is complete\n");
+                        output_complete = 1;
                         break;
                     }
 
@@ -263,6 +265,7 @@ void handle_client(int client_fd) {
                     bytes_read = read(out_pipe[0], buffer, sizeof(buffer) - 1);
                     if (bytes_read <= 0) {
                         DEBUG_PRINT("Shell process closed output for client fd: %d\n", client_fd);
+                        output_complete = 1;
                         break;  // Shell process finished
                     }
                     buffer[bytes_read] = '\0';
