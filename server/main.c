@@ -10,15 +10,14 @@
 #include <errno.h>    // Corrected from <cerrno>
 #include <signal.h>   // Added for signal handling
 #include <sys/wait.h> // Added for waitpid and WNOHANG
+#include <fcntl.h>    // Added for file descriptor flags
 
 #define BUFFER_SIZE 1024
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
-#define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
-// Update this to your shell path
-#define CUSTOM_SHELL_PATH "/mnt/f/DockerFiles/ICT374-A2/shell/egg_shell"
+#define CUSTOM_SHELL_PATH "../shell/egg_shell"
 
 struct ClientInfo {
     int client_socket;
@@ -162,75 +161,48 @@ int authenticate(int client_fd) {
 void handle_client(int client_fd) {
     if (!authenticate(client_fd)) {
         close(client_fd);
-        exit(0);
+        return;
     }
 
-    int shell_to_server[2];
-    int server_to_shell[2];
-
-    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
-        perror("Pipe creation failed");
+    int shell_fds[2];
+    if (pipe(shell_fds) == -1) {
+        perror("Pipe failed");
         close(client_fd);
-        exit(1);
+        return;
     }
 
     pid_t pid = fork();
     if (pid == 0) {
-        if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
-            dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
-            dup2(shell_to_server[1], STDERR_FILENO) == -1) {
-            perror("dup2 failed");
-            exit(1);
-        }
-
-        close(server_to_shell[1]);
-        close(shell_to_server[0]);
+        // Child process: Launch egg_shell
+        dup2(client_fd, STDIN_FILENO);
+        dup2(client_fd, STDOUT_FILENO);
+        dup2(client_fd, STDERR_FILENO);
+        
+        close(shell_fds[0]);
         close(client_fd);
 
-        printf("Attempting to execute custom shell at %s\n", CUSTOM_SHELL_PATH);
         execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
-
-        perror("Failed to execute custom shell");
+        perror("execl failed");
         exit(1);
     } else if (pid > 0) {
-        close(server_to_shell[0]);
-        close(shell_to_server[1]);
+        // Parent process: Close unnecessary ends and wait for child to finish
+        close(shell_fds[1]);
 
         char buffer[BUFFER_SIZE];
-        ssize_t nbytes;
-
-        while (1) {
-            nbytes = read(client_fd, buffer, sizeof(buffer) - 1);
-            if (nbytes <= 0) break;
-
-            buffer[nbytes] = '\0';
-            ssize_t clean_nbytes = strip_cr(buffer, nbytes);
-            buffer[clean_nbytes] = '\0';
-
-            printf("Command received from client: \"%s\"\n", buffer);
-
-            ssize_t command_len = strlen(buffer);
-            if (write(server_to_shell[1], buffer, command_len) != command_len) {
-                perror("Error sending command to shell");
-                break;
-            }
-
-            while ((nbytes = read(shell_to_server[0], buffer, sizeof(buffer) - 1)) > 0) {
-                buffer[nbytes] = '\0';
-                if (write(client_fd, buffer, nbytes) != nbytes) {
-                    perror("Error sending response to client");
-                    break;
-                }
-            }
+        ssize_t bytes_read;
+        
+        while ((bytes_read = read(shell_fds[0], buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[bytes_read] = '\0';
+            write(client_fd, buffer, bytes_read);
         }
 
-        close(server_to_shell[1]);
-        close(shell_to_server[0]);
+        close(shell_fds[0]);
         close(client_fd);
     } else {
         perror("Fork failed");
+        close(shell_fds[0]);
+        close(shell_fds[1]);
         close(client_fd);
-        exit(1);
     }
 }
 
