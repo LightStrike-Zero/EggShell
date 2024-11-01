@@ -165,78 +165,93 @@ int authenticate(int client_fd) {
 }
 
 void handle_client(int client_fd) {
-    int pty_fd;
-    pid_t pid = forkpty(&pty_fd, NULL, NULL, NULL); // Create a PTY
+    int shell_to_server[2];  // Pipe from shell stdout to server
+    int server_to_shell[2];  // Pipe from server to shell stdin
 
+    // Create pipes
+    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
+        perror("pipe failed");
+        close(client_fd);
+        return;
+    }
+
+    pid_t pid = fork();
     if (pid == 0) {
-        // Child process: set up egg_shell in the PTY
-        DEBUG_PRINT("Forked child process for client fd: %d\n", client_fd);
+        // Child process: execute egg_shell with pipes
+        dup2(server_to_shell[0], STDIN_FILENO);  // Read from server to shell pipe as stdin
+        dup2(shell_to_server[1], STDOUT_FILENO); // Write to shell to server pipe as stdout
+        dup2(shell_to_server[1], STDERR_FILENO); // Redirect stderr to the same pipe for consistency
 
-        // Execute the custom shell (egg_shell) inside the PTY
+        close(shell_to_server[0]); // Close unused ends of pipes
+        close(server_to_shell[1]);
+
         execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
         perror("execl failed");
         exit(1);
     } else if (pid > 0) {
-        // Parent process: Communicate with the client and egg_shell via the PTY
-        DEBUG_PRINT("Parent process communicating with child (pid %d) via PTY for client fd: %d\n", pid, client_fd);
+        // Parent process: server communicating with client and egg_shell
+        close(shell_to_server[1]); // Close unused ends of pipes
+        close(server_to_shell[0]);
 
         char buffer[BUFFER_SIZE];
         ssize_t bytes_read;
+        char output_buffer[BUFFER_SIZE * 4];  // To accumulate output for each command
+        int output_len = 0;
 
-        fd_set read_fds;
         while (1) {
-            FD_ZERO(&read_fds);
-            FD_SET(client_fd, &read_fds);
-            FD_SET(pty_fd, &read_fds);
-
-            int max_fd = (client_fd > pty_fd) ? client_fd : pty_fd;
-            int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-
-            if (activity < 0 && errno != EINTR) {
-                perror("select");
-                DEBUG_PRINT("Select failed for client fd: %d\n", client_fd);
-                break;
+            // Read command from client
+            bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+            if (bytes_read <= 0) {
+                DEBUG_PRINT("Client disconnected or read error for client fd: %d\n", client_fd);
+                break;  // Client disconnected
             }
+            buffer[bytes_read] = '\0';
+            DEBUG_PRINT("Received command from client fd %d: %s\n", client_fd, buffer);
 
-            // Check if there’s data from the client (command input)
-            if (FD_ISSET(client_fd, &read_fds)) {
-                bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-                if (bytes_read <= 0) {
-                    DEBUG_PRINT("Client disconnected or read error for client fd: %d\n", client_fd);
-                    break;  // Client disconnected
-                }
+            // Send command to egg_shell via pipe
+            write(server_to_shell[1], buffer, bytes_read);
+            write(server_to_shell[1], "\n", 1);  // Ensure newline to execute command
+
+            // Accumulate output until the `%` prompt is detected
+            output_len = 0;
+            while ((bytes_read = read(shell_to_server[0], buffer, sizeof(buffer) - 1)) > 0) {
                 buffer[bytes_read] = '\0';
-                DEBUG_PRINT("Received command from client fd %d: %s\n", client_fd, buffer);
 
-                // Send command to egg_shell via the PTY
-                write(pty_fd, buffer, bytes_read);
-                DEBUG_PRINT("Command sent to shell for client fd %d: %s\n", client_fd, buffer);
-            }
+                // Append to output buffer
+                strncpy(output_buffer + output_len, buffer, sizeof(output_buffer) - output_len - 1);
+                output_len += bytes_read;
+                output_buffer[output_len] = '\0';
 
-            // Check if there’s output from the shell (PTY output)
-            if (FD_ISSET(pty_fd, &read_fds)) {
-                bytes_read = read(pty_fd, buffer, sizeof(buffer) - 1);
-                if (bytes_read <= 0) {
-                    DEBUG_PRINT("Shell process closed output for client fd: %d\n", client_fd);
-                    break;  // Shell process finished
+                DEBUG_PRINT("Received chunk from shell for client fd %d: %s\n", client_fd, buffer);
+
+                // Check if the output contains the prompt "%"
+                if (strstr(output_buffer, "%") != NULL) {
+                    DEBUG_PRINT("End of command output detected for client fd %d\n", client_fd);
+                    break;
                 }
-                buffer[bytes_read] = '\0';
-                DEBUG_PRINT("Received output from shell for client fd %d: %s\n", client_fd, buffer);
-
-                // Send shell output to the client
-                write(client_fd, buffer, bytes_read);
-                DEBUG_PRINT("Output sent to client fd %d: %s\n", client_fd, buffer);
             }
+
+            // Send accumulated output to client
+            write(client_fd, output_buffer, output_len);
+            DEBUG_PRINT("Output sent to client fd %d: %s\n", client_fd, output_buffer);
+
+            // Reset output buffer for the next command
+            memset(output_buffer, 0, sizeof(output_buffer));
         }
 
-        // Clean up: Close PTY and client connection
+        // Clean up: close pipes and client connection
         close(client_fd);
-        close(pty_fd);
+        close(shell_to_server[0]);
+        close(server_to_shell[1]);
         waitpid(pid, NULL, 0);
         DEBUG_PRINT("Closed connection and cleaned up for client fd: %d\n", client_fd);
     } else {
-        perror("forkpty failed");
+        perror("fork failed");
         close(client_fd);
+        close(shell_to_server[0]);
+        close(shell_to_server[1]);
+        close(server_to_shell[0]);
+        close(server_to_shell[1]);
     }
 }
 void sigchld_handler(int signum) {
