@@ -7,14 +7,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/wait.h>
+#include <errno.h>    // Corrected from <cerrno>
+#include <signal.h>   // Added for signal handling
+#include <sys/wait.h> // Added for waitpid and WNOHANG
 
 #define BUFFER_SIZE 1024
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
+#define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
+
+// Update this to your shell path
+#define CUSTOM_SHELL_PATH "/mnt/f/DockerFiles/ICT374-A2/shell/egg_shell"
 
 struct ClientInfo {
     int client_socket;
@@ -29,7 +33,6 @@ struct UserTable {
 struct ClientInfo client_list[100];
 int client_count = 0;
 
-// Function prototypes
 int setup_server_socket(int port);
 int authenticate(int client_fd);
 void handle_client(int client_fd);
@@ -60,7 +63,7 @@ int main() {
         }
 
         pid_t pid = fork();
-        if (pid == 0) { // Child process
+        if (pid == 0) {
             close(server_fd);
             handle_client(client_fd);
             exit(0);
@@ -136,7 +139,6 @@ int authenticate(int client_fd) {
     }
 
     buffer[n] = '\0';
-
     ssize_t clean_nbytes = strip_cr(buffer, n);
     buffer[clean_nbytes] = '\0';
 
@@ -173,7 +175,7 @@ void handle_client(int client_fd) {
     }
 
     pid_t pid = fork();
-    if (pid == 0) { // Child process (shell)
+    if (pid == 0) {
         if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
             dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
             dup2(shell_to_server[1], STDERR_FILENO) == -1) {
@@ -185,57 +187,40 @@ void handle_client(int client_fd) {
         close(shell_to_server[0]);
         close(client_fd);
 
-        const char *shell_path = "../shell/egg_shell";
-        printf("Attempting to execute shell at path: %s\n", shell_path);
+        printf("Attempting to execute custom shell at %s\n", CUSTOM_SHELL_PATH);
+        execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
 
-        execlp(shell_path, "egg_shell", NULL);
-        
         perror("Failed to execute custom shell");
         exit(1);
-    } else if (pid > 0) { // Parent process (server handling client)
+    } else if (pid > 0) {
         close(server_to_shell[0]);
         close(shell_to_server[1]);
 
-        fd_set read_fds;
         char buffer[BUFFER_SIZE];
         ssize_t nbytes;
 
         while (1) {
             nbytes = read(client_fd, buffer, sizeof(buffer) - 1);
-            if (nbytes <= 0) {
-                if (nbytes < 0) {
-                    perror("Error reading from client");
-                } else {
-                    printf("Client disconnected.\n");
-                }
-                break;
-            }
-            buffer[nbytes] = '\0';
+            if (nbytes <= 0) break;
 
+            buffer[nbytes] = '\0';
             ssize_t clean_nbytes = strip_cr(buffer, nbytes);
             buffer[clean_nbytes] = '\0';
 
             printf("Command received from client: \"%s\"\n", buffer);
 
-            if (strcmp(buffer, "exit") == 0 || strcmp(buffer, "quit") == 0) {
-                write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
-                printf("Received termination command from client.\n");
+            ssize_t command_len = strlen(buffer);
+            if (write(server_to_shell[1], buffer, command_len) != command_len) {
+                perror("Error sending command to shell");
                 break;
             }
 
-            ssize_t command_len = strlen(buffer);
-            write(server_to_shell[1], buffer, command_len);
-
-            char shell_buffer[BUFFER_SIZE];
-            while ((nbytes = read(shell_to_server[0], shell_buffer, sizeof(shell_buffer) - 1)) > 0) {
-                shell_buffer[nbytes] = '\0';
-                if (write(client_fd, shell_buffer, nbytes) <= 0) {
-                    perror("Write error to client");
+            while ((nbytes = read(shell_to_server[0], buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[nbytes] = '\0';
+                if (write(client_fd, buffer, nbytes) != nbytes) {
+                    perror("Error sending response to client");
                     break;
                 }
-            }
-            if (nbytes < 0) {
-                perror("Error reading from shell output");
             }
         }
 
