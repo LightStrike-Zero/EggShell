@@ -156,7 +156,7 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes)
             buffer[j++] = buffer[i];
         }
     }
-    buffer[j] = '\0'; // Null-terminate for safe printing
+    buffer[j] = '\0';                           // Null-terminate for safe printing
     printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
     return j;
 }
@@ -190,13 +190,13 @@ int authenticate(int client_fd)
     {
         write(client_fd, "Authentication successful\n", strlen("Authentication successful\n"));
         printf("User \"%s\" authenticated successfully.\n", received_username); // Debugging
-        return 1; // Authentication success
+        return 1;                                                               // Authentication success
     }
     else
     {
         write(client_fd, "Authentication failed\n", strlen("Authentication failed\n"));
         printf("User \"%s\" failed to authenticate.\n", received_username); // Debugging
-        return 0; // Authentication failed
+        return 0;                                                           // Authentication failed
     }
 }
 
@@ -305,6 +305,14 @@ void handle_client(int client_fd)
                 {
                     printf("Received empty command. Skipping.\n");
                     continue;
+                }
+
+                // Add newline to buffer before writing to shell
+                if (buffer[clean_nbytes - 1] != '\n')
+                {
+                    buffer[clean_nbytes] = '\n';
+                    clean_nbytes += 1;
+                    buffer[clean_nbytes] = '\0'; // Ensure null-termination
                 }
 
                 // Write cleaned data to the shell's stdin
