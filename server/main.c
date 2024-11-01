@@ -368,7 +368,7 @@ void handle_client(int client_fd)
                     }
 
                     // **Append the marker to the command**
-                    const char *marker = "; echo __COMMAND_COMPLETED__\n";
+                    const char *marker = " ; echo __COMMAND_COMPLETED__\n";
                     char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
                     snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", client_buffer, marker);
 
