@@ -16,53 +16,42 @@
 #include <errno.h>
 #include <ctype.h>
 
-void read_command(char *command)
-{
-    // put the terminal in non-canonical mode to gain raw control
+void read_command(char *command) {
+    // Set terminal to raw mode only if in an interactive terminal
     make_raw_terminal();
+    
     int index = 0;
     printf("%s", PS1);
     fflush(stdout);
-    while (1)
-    {
+    
+    while (1) {
         char character;
         ssize_t nread = read(STDIN_FILENO, &character, 1);
-        if (nread == -1 && errno != EAGAIN)
-        {
+        if (nread == -1 && errno != EAGAIN) {
             perror("read");
             break;
-        }
-        else if (nread == 0)
-        {
-            // EOF (Ctrl+D)
+        } else if (nread == 0) {
+            // EOF (e.g., Ctrl+D)
             printf("\n");
             restore_terminal();
             exit(0);
         }
-        if (character == '\n')
-        {
+
+        if (character == '\n') {
             command[index] = '\0';
             printf("\n");
             break;
-        }
-        else if (character == BACKSPACE || character == 8)
-        {
-            if (index > 0)
-            {
+        } else if (character == BACKSPACE || character == 8) {
+            if (index > 0) {
                 index--;
                 command[index] = '\0';
                 printf("\b \b");
                 fflush(stdout);
             }
-        }
-        else if (character == ESCAPE)
-        {
+        } else if (character == ESCAPE) {
             handle_history_navigation(command, &index, PS1);
-        }
-        else if (isprint(character))
-        {
-            if (index < MAX_COMMAND_LENGTH - 1)
-            {
+        } else if (isprint(character)) {
+            if (index < MAX_COMMAND_LENGTH - 1) {
                 command[index++] = character;
                 command[index] = '\0';
                 printf("%c", character);
@@ -70,17 +59,17 @@ void read_command(char *command)
             }
         }
     }
-    // Restore original terminal settings
-    restore_terminal();
-    // Handle history repetition
+
+    restore_terminal();  // Restore terminal settings at the end
+
+    // Handle history repetition if command starts with '!'
     if (command[0] == '!') {
         if (command[1] == '\0') {
-            // Repeat the last command
             if (history_count > 0) {
                 repeat_command_by_number(history_count, command);
             } else {
                 printf("No commands in history.\n");
-                command[0] = '\0'; // Clear the command
+                command[0] = '\0';
             }
         } else if (isdigit(command[1])) {
             int cmd_num = atoi(&command[1]);
@@ -95,7 +84,6 @@ void read_command(char *command)
         add_to_history(command);
     }
 }
-
 // Initialize the Command struct
 void init_command(Command *cmd) {
     cmd->original_command = NULL;

@@ -16,6 +16,11 @@
 struct termios original_terminal_input;
 
 void make_raw_terminal() {
+    if (!isatty(STDIN_FILENO)) {
+        // If not running in a terminal (e.g., over a network socket), skip raw mode
+        return;
+    }
+
     struct termios raw_terminal_input_mode;
     if (tcgetattr(STDIN_FILENO, &original_terminal_input) == -1) {
         perror("tcgetattr");
@@ -32,10 +37,10 @@ void make_raw_terminal() {
     }
 }
 
-void restore_terminal()
-{
-    tcsetattr(STDIN_FILENO, TCSANOW, &original_terminal_input);
-    // restores terminal to original settings for standard input
+void restore_terminal() {
+    if (isatty(STDIN_FILENO)) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &original_terminal_input);
+    }
 }
 
 
