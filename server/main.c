@@ -176,7 +176,6 @@ void handle_client(int client_fd) {
     int in_pipe[2], out_pipe[2];
     if (pipe(in_pipe) == -1 || pipe(out_pipe) == -1) {
         perror("pipe");
-        DEBUG_PRINT("Pipe creation failed for client fd: %d\n", client_fd);
         close(client_fd);
         return;
     }
@@ -187,18 +186,9 @@ void handle_client(int client_fd) {
         DEBUG_PRINT("Forked child process for client fd: %d\n", client_fd);
 
         // Redirect stdin and stdout to the pipes
-        if (dup2(in_pipe[0], STDIN_FILENO) == -1) {
-            perror("dup2 stdin failed");
-            exit(1);
-        }
-        if (dup2(out_pipe[1], STDOUT_FILENO) == -1) {
-            perror("dup2 stdout failed");
-            exit(1);
-        }
-        if (dup2(out_pipe[1], STDERR_FILENO) == -1) {
-            perror("dup2 stderr failed");
-            exit(1);
-        }
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(out_pipe[1], STDERR_FILENO);
 
         // Close unused pipe ends
         close(in_pipe[1]);
@@ -221,7 +211,15 @@ void handle_client(int client_fd) {
         char buffer[BUFFER_SIZE];
         ssize_t bytes_read;
 
-        // Use select to manage communication between client and shell
+        // Initial read to capture welcome message or any startup text from egg_shell
+        bytes_read = read(out_pipe[0], buffer, sizeof(buffer) - 1);
+        if (bytes_read > 0) {
+            buffer[bytes_read] = '\0';
+            DEBUG_PRINT("Initial output from egg_shell for client fd %d: %s\n", client_fd, buffer);
+            write(client_fd, buffer, bytes_read);  // Send welcome message to client
+        }
+
+        // Main communication loop with select for real-time sync
         fd_set read_fds;
         while (1) {
             FD_ZERO(&read_fds);
@@ -247,9 +245,12 @@ void handle_client(int client_fd) {
                 buffer[bytes_read] = '\0';
                 DEBUG_PRINT("Received command from client fd %d: %s\n", client_fd, buffer);
 
+                // Ensure command is newline-terminated before sending to shell
+                strncat(buffer, "\n", sizeof(buffer) - strlen(buffer) - 1);
+                
                 // Send command to egg_shell
-                ssize_t bytes_written = write(in_pipe[1], buffer, bytes_read);
-                if (bytes_written != bytes_read) {
+                ssize_t bytes_written = write(in_pipe[1], buffer, strlen(buffer));
+                if (bytes_written != strlen(buffer)) {
                     perror("write to shell failed");
                     DEBUG_PRINT("Failed to write command to shell for client fd: %d\n", client_fd);
                     break;
