@@ -19,6 +19,11 @@
 
 #define CUSTOM_SHELL_PATH "../shell/egg_shell"
 
+#define DEBUG 1  // Set to 1 to enable debug output, 0 to disable
+
+#define DEBUG_PRINT(fmt, ...) \
+    do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
+
 struct ClientInfo {
     int client_socket;
     pid_t pid;
@@ -159,49 +164,135 @@ int authenticate(int client_fd) {
 }
 
 void handle_client(int client_fd) {
+    DEBUG_PRINT("Client connected with fd: %d\n", client_fd);
+
     if (!authenticate(client_fd)) {
+        DEBUG_PRINT("Authentication failed for client fd: %d\n", client_fd);
         close(client_fd);
         return;
     }
+    DEBUG_PRINT("Authentication successful for client fd: %d\n", client_fd);
 
-    int shell_fds[2];
-    if (pipe(shell_fds) == -1) {
-        perror("Pipe failed");
+    int in_pipe[2], out_pipe[2];
+    if (pipe(in_pipe) == -1 || pipe(out_pipe) == -1) {
+        perror("pipe");
+        DEBUG_PRINT("Pipe creation failed for client fd: %d\n", client_fd);
         close(client_fd);
         return;
     }
 
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process: Launch egg_shell
-        dup2(client_fd, STDIN_FILENO);
-        dup2(client_fd, STDOUT_FILENO);
-        dup2(client_fd, STDERR_FILENO);
-        
-        close(shell_fds[0]);
-        close(client_fd);
+        // Child process: Set up egg_shell
+        DEBUG_PRINT("Forked child process for client fd: %d\n", client_fd);
 
+        // Redirect stdin and stdout to the pipes
+        if (dup2(in_pipe[0], STDIN_FILENO) == -1) {
+            perror("dup2 stdin failed");
+            exit(1);
+        }
+        if (dup2(out_pipe[1], STDOUT_FILENO) == -1) {
+            perror("dup2 stdout failed");
+            exit(1);
+        }
+        if (dup2(out_pipe[1], STDERR_FILENO) == -1) {
+            perror("dup2 stderr failed");
+            exit(1);
+        }
+
+        // Close unused pipe ends
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(client_fd);  // Child does not need access to the client socket
+
+        DEBUG_PRINT("Executing egg_shell for client fd: %d\n", client_fd);
+        // Execute the custom shell
         execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
         perror("execl failed");
         exit(1);
     } else if (pid > 0) {
-        // Parent process: Close unnecessary ends and wait for child to finish
-        close(shell_fds[1]);
+        // Parent process: Communicate with client and child shell
+        DEBUG_PRINT("Parent process communicating with child (pid %d) for client fd: %d\n", pid, client_fd);
+
+        // Close unused pipe ends in the parent
+        close(in_pipe[0]);
+        close(out_pipe[1]);
 
         char buffer[BUFFER_SIZE];
         ssize_t bytes_read;
-        
-        while ((bytes_read = read(shell_fds[0], buffer, sizeof(buffer) - 1)) > 0) {
-            buffer[bytes_read] = '\0';
-            write(client_fd, buffer, bytes_read);
+
+        // Use select to manage communication between client and shell
+        fd_set read_fds;
+        while (1) {
+            FD_ZERO(&read_fds);
+            FD_SET(client_fd, &read_fds);
+            FD_SET(out_pipe[0], &read_fds);
+
+            int max_fd = (client_fd > out_pipe[0]) ? client_fd : out_pipe[0];
+            int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+
+            if (activity < 0 && errno != EINTR) {
+                perror("select");
+                DEBUG_PRINT("Select failed for client fd: %d\n", client_fd);
+                break;
+            }
+
+            // Check if there's data from the client
+            if (FD_ISSET(client_fd, &read_fds)) {
+                bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+                if (bytes_read <= 0) {
+                    DEBUG_PRINT("Client disconnected or read error for client fd: %d\n", client_fd);
+                    break;  // Client disconnected
+                }
+                buffer[bytes_read] = '\0';
+                DEBUG_PRINT("Received command from client fd %d: %s\n", client_fd, buffer);
+
+                // Send command to egg_shell
+                ssize_t bytes_written = write(in_pipe[1], buffer, bytes_read);
+                if (bytes_written != bytes_read) {
+                    perror("write to shell failed");
+                    DEBUG_PRINT("Failed to write command to shell for client fd: %d\n", client_fd);
+                    break;
+                }
+                DEBUG_PRINT("Command sent to shell for client fd %d: %s\n", client_fd, buffer);
+            }
+
+            // Check if there's output from the shell
+            if (FD_ISSET(out_pipe[0], &read_fds)) {
+                bytes_read = read(out_pipe[0], buffer, sizeof(buffer) - 1);
+                if (bytes_read <= 0) {
+                    DEBUG_PRINT("Shell process closed output for client fd: %d\n", client_fd);
+                    break;  // Shell process finished
+                }
+                buffer[bytes_read] = '\0';
+                DEBUG_PRINT("Received output from shell for client fd %d: %s\n", client_fd, buffer);
+
+                // Send output back to client
+                ssize_t client_written = write(client_fd, buffer, bytes_read);
+                if (client_written != bytes_read) {
+                    perror("write to client failed");
+                    DEBUG_PRINT("Failed to write shell output to client fd: %d\n", client_fd);
+                    break;
+                }
+                DEBUG_PRINT("Output sent to client fd %d: %s\n", client_fd, buffer);
+            }
         }
 
-        close(shell_fds[0]);
+        // Clean up: Close pipes and client connection
+        close(in_pipe[1]);
+        close(out_pipe[0]);
         close(client_fd);
+
+        // Wait for the child process to finish
+        waitpid(pid, NULL, 0);
+        DEBUG_PRINT("Closed connection and cleaned up for client fd: %d\n", client_fd);
     } else {
-        perror("Fork failed");
-        close(shell_fds[0]);
-        close(shell_fds[1]);
+        perror("fork");
+        DEBUG_PRINT("Fork failed for client fd: %d\n", client_fd);
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
         close(client_fd);
     }
 }
