@@ -18,6 +18,8 @@
 #define PORT 40210
 #define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
+float version = 0.24;
+
 struct ClientInfo
 {
     int client_socket;
@@ -43,6 +45,8 @@ int contains_marker(const char *buffer, size_t len);
 
 int main()
 {
+    printf("Version: %f\n", version);
+
     // Set up the SIGCHLD handler to reap zombie processes
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
@@ -202,9 +206,11 @@ int authenticate(int client_fd)
     }
 }
 
-void handle_client(int client_fd) {
+void handle_client(int client_fd)
+{
     // Authenticate the client first
-    if (!authenticate(client_fd)) {
+    if (!authenticate(client_fd))
+    {
         close(client_fd);
         exit(0); // Terminate child process if authentication fails
     }
@@ -213,18 +219,21 @@ void handle_client(int client_fd) {
     int server_to_shell[2]; // Pipe from server to shell's stdin
 
     // Create pipes for communication with the shell
-    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
+    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1)
+    {
         perror("Pipe creation failed");
         close(client_fd);
         exit(1);
     }
 
     pid_t pid = fork();
-    if (pid == 0) { // Child process (shell)
+    if (pid == 0)
+    { // Child process (shell)
         // Redirect shell's stdin, stdout, and stderr to the pipes
         if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
             dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
-            dup2(shell_to_server[1], STDERR_FILENO) == -1) {
+            dup2(shell_to_server[1], STDERR_FILENO) == -1)
+        {
             perror("dup2 failed");
             exit(1);
         }
@@ -233,11 +242,13 @@ void handle_client(int client_fd) {
         close(shell_to_server[0]); // Child doesn't read from shell_to_server
         close(client_fd);          // Child doesn't need client's socket
 
-        // Execute the shell in non-interactive mode
-        execlp("/bin/bash", "bash", "--noprofile", "--norc", NULL);
-        perror("Failed to execute shell");
+        // Execute the shell with line-buffered stdout
+        execlp("stdbuf", "stdbuf", "-oL", "/bin/bash", "bash", "--noprofile", "--norc", NULL);
+        perror("Failed to execute shell with stdbuf");
         exit(1);
-    } else if (pid > 0) { // Parent process (server handling client)
+    }
+    else if (pid > 0)
+    {                              // Parent process (server handling client)
         close(server_to_shell[0]); // Parent doesn't read from server_to_shell
         close(shell_to_server[1]); // Parent doesn't write to shell_to_server
 
@@ -246,10 +257,12 @@ void handle_client(int client_fd) {
         char buffer[BUFFER_SIZE];
         ssize_t nbytes; // **Add this line to declare nbytes**
 
-        while (1) {
+        while (1)
+        {
             // Read command from client
             nbytes = read(client_fd, buffer, sizeof(buffer) - 1);
-            if (nbytes <= 0) {
+            if (nbytes <= 0)
+            {
                 // Handle disconnection or error
                 break;
             }
@@ -260,7 +273,8 @@ void handle_client(int client_fd) {
             buffer[clean_nbytes] = '\0'; // Ensure null-termination
 
             // Check for termination command
-            if (strcmp(buffer, "exit\n") == 0 || strcmp(buffer, "quit\n") == 0) {
+            if (strcmp(buffer, "exit\n") == 0 || strcmp(buffer, "quit\n") == 0)
+            {
                 write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
                 printf("Received termination command from client.\n");
                 break;
@@ -274,9 +288,11 @@ void handle_client(int client_fd) {
             // Write the modified command to the shell's stdin
             ssize_t total_written = 0;
             ssize_t command_len = strlen(command_with_marker);
-            while (total_written < command_len) {
+            while (total_written < command_len)
+            {
                 ssize_t bytes_written = write(server_to_shell[1], command_with_marker + total_written, command_len - total_written);
-                if (bytes_written <= 0) {
+                if (bytes_written <= 0)
+                {
                     perror("Write error to shell");
                     break;
                 }
@@ -288,20 +304,24 @@ void handle_client(int client_fd) {
             size_t shell_buffer_len = 0;
             int command_completed = 0;
 
-            while (!command_completed) {
+            while (!command_completed)
+            {
                 FD_ZERO(&read_fds);
                 FD_SET(shell_to_server[0], &read_fds);
 
                 int activity = select(shell_to_server[0] + 1, &read_fds, NULL, NULL, NULL);
-                if (activity < 0 && errno != EINTR) {
+                if (activity < 0 && errno != EINTR)
+                {
                     perror("Select error");
                     break;
                 }
 
-                if (FD_ISSET(shell_to_server[0], &read_fds)) {
+                if (FD_ISSET(shell_to_server[0], &read_fds))
+                {
                     // Read data from the shell
                     nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
-                    if (nbytes <= 0) {
+                    if (nbytes <= 0)
+                    {
                         // Handle shell termination or error
                         break;
                     }
@@ -315,14 +335,17 @@ void handle_client(int client_fd) {
 
                     // Optionally remove the marker from the output sent to the client
                     char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
-                    if (marker_position != NULL) {
+                    if (marker_position != NULL)
+                    {
                         command_completed = 1;
                         data_to_write = marker_position - shell_buffer;
                     }
 
-                    while (total_written < data_to_write) {
+                    while (total_written < data_to_write)
+                    {
                         ssize_t bytes_written = write(client_fd, shell_buffer + total_written, data_to_write - total_written);
-                        if (bytes_written <= 0) {
+                        if (bytes_written <= 0)
+                        {
                             perror("Write error to client");
                             break;
                         }
@@ -330,11 +353,14 @@ void handle_client(int client_fd) {
                     }
 
                     // If the marker was found, handle any remaining data
-                    if (command_completed && (shell_buffer_len > data_to_write + strlen(COMMAND_COMPLETION_MARKER))) {
+                    if (command_completed && (shell_buffer_len > data_to_write + strlen(COMMAND_COMPLETION_MARKER)))
+                    {
                         size_t remaining_data = shell_buffer_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
                         memmove(shell_buffer, shell_buffer + data_to_write + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
                         shell_buffer_len = remaining_data;
-                    } else {
+                    }
+                    else
+                    {
                         shell_buffer_len = 0; // Reset buffer for next read
                     }
                 }
@@ -345,13 +371,14 @@ void handle_client(int client_fd) {
         close(server_to_shell[1]);
         close(shell_to_server[0]);
         close(client_fd);
-    } else {
+    }
+    else
+    {
         perror("Fork failed");
         close(client_fd);
         exit(1);
     }
 }
-
 
 // Signal handler to reap zombie processes
 void sigchld_handler(int signum)
@@ -363,16 +390,20 @@ void sigchld_handler(int signum)
     errno = saved_errno;
 }
 
-int contains_marker(const char *buffer, size_t len) {
+int contains_marker(const char *buffer, size_t len)
+{
     static char marker[] = COMMAND_COMPLETION_MARKER;
     size_t marker_len = strlen(marker);
 
-    if (len < marker_len) {
+    if (len < marker_len)
+    {
         return 0;
     }
 
-    for (size_t i = 0; i <= len - marker_len; i++) {
-        if (strncmp(buffer + i, marker, marker_len) == 0) {
+    for (size_t i = 0; i <= len - marker_len; i++)
+    {
+        if (strncmp(buffer + i, marker, marker_len) == 0)
+        {
             return 1;
         }
     }
