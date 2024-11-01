@@ -1,3 +1,17 @@
+/**
+ * @file server.c
+ * @brief PTY-Based Client-Server Shell Implementation
+ *
+ * This server listens for incoming client connections, authenticates them,
+ * spawns a shell within a PTY for each authenticated client, and facilitates
+ * bidirectional communication between the client and the shell.
+ *
+ * Supports both custom clients and standard clients like Telnet.
+ *
+ * Author: [Your Name]
+ * Date: [Date]
+ */
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -13,23 +27,16 @@
 #include <pty.h>
 #include <utmp.h>
 #include <termios.h>
+#include <fcntl.h>
 
-#define BUFFER_SIZE 1024
-
+#define BUFFER_SIZE 4096
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
+#define MAX_CLIENTS 100
 
-float version = 0.27;
-
-struct ClientInfo
-{
-    int client_socket;
-    pid_t pid;
-};
-
-struct UserTable
-{
+// Authentication structure
+struct UserTable {
     char username[USERNAME_LENGTH];
     char password[PASSWORD_LENGTH];
 } userTable = {"test", "test"};
@@ -41,9 +48,10 @@ void handle_client(int client_fd);
 ssize_t strip_cr(char *buffer, ssize_t nbytes);
 void sigchld_handler(int signum);
 
+// Main function
 int main()
 {
-    printf("Version: %.2f\n", version);
+    printf("PTY-Based Server Version: 0.27\n");
 
     // Set up the SIGCHLD handler to reap zombie processes
     struct sigaction sa;
@@ -54,11 +62,15 @@ int main()
     if (sigaction(SIGCHLD, &sa, NULL) == -1)
     {
         perror("sigaction");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    // Step 1: Initialize server socket
+    // Initialize server socket
     int server_fd = setup_server_socket(PORT);
+
+    // Array to keep track of client PIDs (optional, for management)
+    pid_t client_pids[MAX_CLIENTS];
+    memset(client_pids, 0, sizeof(client_pids));
 
     // Main server loop
     while (1)
@@ -66,7 +78,7 @@ int main()
         struct sockaddr_in cli_addr;
         socklen_t clilen = sizeof(cli_addr);
 
-        // Step 2: Accept a new client connection
+        // Accept a new client connection
         int client_fd = accept(server_fd, (struct sockaddr *)&cli_addr, &clilen);
         if (client_fd < 0)
         {
@@ -76,41 +88,59 @@ int main()
 
         printf("Connection from %s:%d\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
 
-        // Step 3: Fork a new process for each client
+        // Fork a new process to handle the client
         pid_t pid = fork();
         if (pid == 0)
-        {                             // Child process
-            close(server_fd);         // Close unused server socket in child
-            handle_client(client_fd); // Handle the client
-            exit(0);                  // End child process after handling client
+        {
+            // Child process
+            close(server_fd); // Close the listening socket in the child
+            handle_client(client_fd); // Handle client communication
+            exit(EXIT_SUCCESS); // Terminate child after handling client
         }
         else if (pid > 0)
         {
-            close(client_fd); // Close unused client socket in parent
+            // Parent process
+            close(client_fd); // Close client socket in parent
+            // Optionally, store client PIDs if needed
+            for (int i = 0; i < MAX_CLIENTS; i++)
+            {
+                if (client_pids[i] == 0)
+                {
+                    client_pids[i] = pid;
+                    break;
+                }
+            }
         }
         else
         {
+            // Fork failed
             perror("Fork failed");
             close(client_fd);
         }
     }
 
-    // Cleanup
+    // Cleanup (unreachable in this code)
     close(server_fd);
     return 0;
 }
 
+/**
+ * @brief Set up the server socket to listen on the specified port.
+ *
+ * @param port The port number to listen on.
+ * @return The file descriptor for the listening socket.
+ */
 int setup_server_socket(int port)
 {
     int sockfd;
     struct sockaddr_in serv_addr;
 
-    // Open socket
+    // Create socket (IPv4, TCP)
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
     {
         perror("Error opening socket");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     // Allow address reuse
@@ -119,37 +149,42 @@ int setup_server_socket(int port)
     {
         perror("setsockopt(SO_REUSEADDR) failed");
         close(sockfd);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    // Configure server address
+    // Configure server address structure
     memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(port);
+    serv_addr.sin_family = AF_INET; // IPv4
+    serv_addr.sin_addr.s_addr = INADDR_ANY; // Bind to all interfaces
+    serv_addr.sin_port = htons(port); // Host to network byte order
 
-    // Bind socket to port
+    // Bind socket to the specified port
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
         perror("Error on binding");
         close(sockfd);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    // Start listening on the socket
+    // Start listening with a backlog of 5
     if (listen(sockfd, 5) < 0)
     {
         perror("Error on listen");
         close(sockfd);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     printf("Server listening on port %d\n", port);
-
-    // Return the server socket descriptor to main
     return sockfd;
 }
 
+/**
+ * @brief Strip carriage return characters from the buffer.
+ *
+ * @param buffer The input buffer.
+ * @param nbytes Number of bytes in the buffer.
+ * @return The new length of the buffer after stripping.
+ */
 ssize_t strip_cr(char *buffer, ssize_t nbytes)
 {
     ssize_t j = 0;
@@ -164,9 +199,15 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes)
     return j;
 }
 
+/**
+ * @brief Authenticate the client by reading username and password.
+ *
+ * @param client_fd The client socket file descriptor.
+ * @return 1 if authentication is successful, 0 otherwise.
+ */
 int authenticate(int client_fd)
 {
-    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 2]; // +1 for space, +1 for '\0'
+    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 3]; // +2 for space and '\n', +1 for '\0'
     int n = read(client_fd, buffer, sizeof(buffer) - 1); // Read into buffer
     if (n <= 0)
     {
@@ -174,7 +215,7 @@ int authenticate(int client_fd)
         return 0;
     }
 
-    buffer[n] = '\0'; // Null-terminate to ensure it’s a proper string
+    buffer[n] = '\0'; // Null-terminate to ensure it's a proper string
 
     // Strip '\r' from buffer
     ssize_t clean_nbytes = strip_cr(buffer, n);
@@ -187,7 +228,9 @@ int authenticate(int client_fd)
     char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
     if (sscanf(buffer, "%29s %11s", received_username, received_password) != 2)
     {
-        write(client_fd, "Invalid authentication format. Use: <username> <password>\n", strlen("Invalid authentication format. Use: <username> <password>\n"));
+        const char *invalid_format = "Invalid authentication format. Use: <username> <password>\n";
+        write(client_fd, invalid_format, strlen(invalid_format));
+        printf("Invalid authentication format received.\n");
         return 0;
     }
 
@@ -195,25 +238,32 @@ int authenticate(int client_fd)
     if (strcmp(received_username, userTable.username) == 0 &&
         strcmp(received_password, userTable.password) == 0)
     {
-        write(client_fd, "Authentication successful\n", strlen("Authentication successful\n"));
+        const char *success = "Authentication successful\n";
+        write(client_fd, success, strlen(success));
         printf("User \"%s\" authenticated successfully.\n", received_username); // Debugging
         return 1; // Authentication success
     }
     else
     {
-        write(client_fd, "Authentication failed\n", strlen("Authentication failed\n"));
+        const char *failure = "Authentication failed\n";
+        write(client_fd, failure, strlen(failure));
         printf("User \"%s\" failed to authenticate.\n", received_username); // Debugging
         return 0; // Authentication failed
     }
 }
 
+/**
+ * @brief Handle communication between the client and the shell within a PTY.
+ *
+ * @param client_fd The client socket file descriptor.
+ */
 void handle_client(int client_fd)
 {
     // Authenticate the client first
     if (!authenticate(client_fd))
     {
         close(client_fd);
-        exit(0); // Terminate child process if authentication fails
+        exit(EXIT_FAILURE); // Terminate child process if authentication fails
     }
 
     // Allocate a PTY and fork the shell
@@ -223,16 +273,16 @@ void handle_client(int client_fd)
     {
         perror("forkpty failed");
         close(client_fd);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     if (pid == 0)
     {
         // Child process: execute the shell
         // Replace with your custom shell if needed
-        execlp("/bin/bash", "/bin/bash", "--noprofile", "--norc", NULL);
+        execlp("./custom_shell", "./custom_shell", NULL);
         perror("execlp failed");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     // Parent process: communicate between client_fd and master_fd
@@ -240,6 +290,8 @@ void handle_client(int client_fd)
     int max_fd = (client_fd > master_fd) ? client_fd : master_fd;
     char buffer[BUFFER_SIZE];
     ssize_t nbytes;
+
+    printf("Shell process started with PID %d\n", pid);
 
     while (1)
     {
@@ -262,12 +314,35 @@ void handle_client(int client_fd)
             nbytes = read(client_fd, buffer, sizeof(buffer));
             if (nbytes > 0)
             {
+                // Strip '\r' if present
+                ssize_t clean_nbytes = strip_cr(buffer, nbytes);
+                buffer[clean_nbytes] = '\0';
+
+                // Debugging: Log the command received
+                printf("Received from client: \"%s\"\n", buffer);
+
                 // Optional: Handle special commands like "exit" or "quit"
-                // For simplicity, directly forward to shell
-                if (write(master_fd, buffer, nbytes) != nbytes)
+                if (strncmp(buffer, "exit", 4) == 0 ||
+                    strncmp(buffer, "quit", 4) == 0 ||
+                    strncmp(buffer, "logout", 6) == 0)
                 {
-                    perror("write to master_fd failed");
+                    const char *disconnect_msg = "Disconnecting...\n";
+                    write(client_fd, disconnect_msg, strlen(disconnect_msg));
+                    printf("Received termination command from client.\n");
                     break;
+                }
+
+                // Write the received data to the shell's PTY
+                ssize_t total_written = 0;
+                while (total_written < clean_nbytes)
+                {
+                    ssize_t bytes_written = write(master_fd, buffer + total_written, clean_nbytes - total_written);
+                    if (bytes_written <= 0)
+                    {
+                        perror("write to master_fd failed");
+                        break;
+                    }
+                    total_written += bytes_written;
                 }
             }
             else if (nbytes == 0)
@@ -289,11 +364,21 @@ void handle_client(int client_fd)
             nbytes = read(master_fd, buffer, sizeof(buffer));
             if (nbytes > 0)
             {
-                if (write(client_fd, buffer, nbytes) != nbytes)
+                // Write the data to the client
+                ssize_t total_written = 0;
+                while (total_written < nbytes)
                 {
-                    perror("write to client_fd failed");
-                    break;
+                    ssize_t bytes_written = write(client_fd, buffer + total_written, nbytes - total_written);
+                    if (bytes_written <= 0)
+                    {
+                        perror("write to client_fd failed");
+                        break;
+                    }
+                    total_written += bytes_written;
                 }
+
+                // Optional: Log the output sent to client
+                printf("Sent to client: \"%.*s\"\n", (int)nbytes, buffer);
             }
             else if (nbytes == 0)
             {
@@ -312,11 +397,17 @@ void handle_client(int client_fd)
     // Clean up
     close(master_fd);
     close(client_fd);
-    // Optionally, terminate the shell process
+    // Optionally, terminate the shell process if it's still running
     kill(pid, SIGKILL);
     waitpid(pid, NULL, 0);
+    printf("Client handler terminated.\n");
 }
 
+/**
+ * @brief Signal handler to reap zombie processes.
+ *
+ * @param signum The signal number.
+ */
 void sigchld_handler(int signum)
 {
     // Save and restore errno to avoid side effects
