@@ -175,11 +175,14 @@ void connect_to_server(char *hostname, int port) {
 
     printf("Password: ");
     fflush(stdout);
+    // Disable echoing for password input
+    struct termios oldt, newt;
     fgets(password, sizeof(password), stdin);
     printf("\n"); // Move to the next line
     password[strcspn(password, "\n")] = '\0'; // Remove newline character
 
     // Send credentials to server
+    // Here, we assume the protocol is: send "<username> <password>"
     snprintf(buffer, sizeof(buffer), "%s %s", username, password);
     send(sockfd, buffer, strlen(buffer), 0);
 
@@ -197,13 +200,14 @@ void connect_to_server(char *hostname, int port) {
     // Check if authentication was successful
     if (strstr(buffer, "Authentication successful") != NULL) {
         printf("Logged in successfully.\n");
+        // Proceed with further communication if needed
     } else {
         printf("Authentication failed.\n");
         close(sockfd);
         return;
     }
 
-    // Communication loop
+     // Communication loop
     while (1) {
         printf("Remote shell> ");
         fflush(stdout);
@@ -232,49 +236,23 @@ void connect_to_server(char *hostname, int port) {
         }
 
         // Receive response from server
-        // Read in a loop until the command completion marker is detected
-        char recv_buffer[1024];
-        int total_bytes_received;
-        int marker_found = 0;
-
-        while (!marker_found) {
-            bytes_received = recv(sockfd, recv_buffer, sizeof(recv_buffer) - 1, 0);
-            if (bytes_received < 0) {
-                perror("Error receiving response from server");
-                break;
-            } else if (bytes_received == 0) {
-                printf("Server closed the connection.\n");
-                close(sockfd);
-                return;
-            }
-
-            recv_buffer[bytes_received] = '\0';
-
-            // Check if the command completion marker is in the received data
-            char *marker_position = strstr(recv_buffer, "__COMMAND_COMPLETED__");
-            if (marker_position != NULL) {
-                marker_found = 1;
-                // Calculate the length of data before the marker
-                int data_length = marker_position - recv_buffer;
-
-                // Print the output up to the marker
-                if (data_length > 0) {
-                    printf("%.*s", data_length, recv_buffer);
-                }
-            } else {
-                // Print the received data
-                printf("%s", recv_buffer);
-            }
+        bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_received < 0) {
+            perror("Error receiving response from server");
+            break;
+        } else if (bytes_received == 0) {
+            printf("Server closed the connection.\n");
+            break;
         }
 
-        // Optionally, print a newline for better formatting
-        printf("\n");
+        buffer[bytes_received] = '\0';
+        printf("%s\n", buffer);
     }
+
 
     // Close the connection
     close(sockfd);
 }
-
 
 void exit_shell() {
     restore_terminal();
