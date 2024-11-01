@@ -15,7 +15,6 @@
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
-#define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
 struct ClientInfo {
     int client_socket;
@@ -36,10 +35,8 @@ int authenticate(int client_fd);
 void handle_client(int client_fd);
 ssize_t strip_cr(char *buffer, ssize_t nbytes);
 void sigchld_handler(int signum);
-int contains_marker(const char *buffer, size_t len);
 
 int main() {
-    // Set up the SIGCHLD handler to reap zombie processes
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
@@ -50,22 +47,18 @@ int main() {
         exit(1);
     }
 
-    // Step 1: Initialize server socket
     int server_fd = setup_server_socket(PORT);
 
-    // Main server loop
     while (1) {
         struct sockaddr_in cli_addr;
         socklen_t clilen = sizeof(cli_addr);
 
-        // Step 2: Accept a new client connection
         int client_fd = accept(server_fd, (struct sockaddr *)&cli_addr, &clilen);
         if (client_fd < 0) {
             perror("Error on accept");
             continue;
         }
 
-        // Step 3: Fork a new process for each client
         pid_t pid = fork();
         if (pid == 0) { // Child process
             close(server_fd);
@@ -95,27 +88,23 @@ int setup_server_socket(int port) {
     int sockfd;
     struct sockaddr_in serv_addr;
 
-    // Open socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
         perror("Error opening socket");
         exit(1);
     }
 
-    // Configure server address
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(port);
 
-    // Bind socket to port
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("Error on binding");
         close(sockfd);
         exit(1);
     }
 
-    // Start listening on the socket
     if (listen(sockfd, 5) < 0) {
         perror("Error on listen");
         close(sockfd);
@@ -123,7 +112,6 @@ int setup_server_socket(int port) {
     }
 
     printf("Server listening on port %d\n", port);
-
     return sockfd;
 }
 
@@ -202,7 +190,6 @@ void handle_client(int client_fd) {
 
         execlp(shell_path, "egg_shell", NULL);
         
-        // If execlp returns, it means there was an error
         perror("Failed to execute custom shell");
         exit(1);
     } else if (pid > 0) { // Parent process (server handling client)
@@ -210,7 +197,6 @@ void handle_client(int client_fd) {
         close(shell_to_server[1]);
 
         fd_set read_fds;
-        int max_fd = (client_fd > shell_to_server[0]) ? client_fd : shell_to_server[0];
         char buffer[BUFFER_SIZE];
         ssize_t nbytes;
 
@@ -237,75 +223,19 @@ void handle_client(int client_fd) {
                 break;
             }
 
-            const char *marker = "; echo __COMMAND_COMPLETED__\n";
-            char command_with_marker[BUFFER_SIZE + 50];
-            snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", buffer, marker);
-
-            ssize_t total_written = 0;
-            ssize_t command_len = strlen(command_with_marker);
-            while (total_written < command_len) {
-                ssize_t bytes_written = write(server_to_shell[1], command_with_marker + total_written, command_len - total_written);
-                if (bytes_written <= 0) {
-                    perror("Write error to shell");
-                    break;
-                }
-                total_written += bytes_written;
-            }
+            ssize_t command_len = strlen(buffer);
+            write(server_to_shell[1], buffer, command_len);
 
             char shell_buffer[BUFFER_SIZE];
-            size_t shell_buffer_len = 0;
-            int command_completed = 0;
-
-            while (!command_completed) {
-                FD_ZERO(&read_fds);
-                FD_SET(shell_to_server[0], &read_fds);
-
-                int activity = select(shell_to_server[0] + 1, &read_fds, NULL, NULL, NULL);
-                if (activity < 0 && errno != EINTR) {
-                    perror("Select error");
+            while ((nbytes = read(shell_to_server[0], shell_buffer, sizeof(shell_buffer) - 1)) > 0) {
+                shell_buffer[nbytes] = '\0';
+                if (write(client_fd, shell_buffer, nbytes) <= 0) {
+                    perror("Write error to client");
                     break;
                 }
-
-                if (FD_ISSET(shell_to_server[0], &read_fds)) {
-                    nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
-                    if (nbytes <= 0) {
-                        if (nbytes < 0) {
-                            perror("Error reading from shell");
-                        } else {
-                            printf("Shell process terminated.\n");
-                        }
-                        break;
-                    }
-
-                    shell_buffer_len += nbytes;
-                    shell_buffer[shell_buffer_len] = '\0';
-
-                    ssize_t total_written = 0;
-                    size_t data_to_write = shell_buffer_len;
-
-                    char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
-                    if (marker_position != NULL) {
-                        command_completed = 1;
-                        data_to_write = marker_position - shell_buffer;
-                    }
-
-                    while (total_written < data_to_write) {
-                        ssize_t bytes_written = write(client_fd, shell_buffer + total_written, data_to_write - total_written);
-                        if (bytes_written <= 0) {
-                            perror("Write error to client");
-                            break;
-                        }
-                        total_written += bytes_written;
-                    }
-
-                    if (command_completed && (shell_buffer_len > data_to_write + strlen(COMMAND_COMPLETION_MARKER))) {
-                        size_t remaining_data = shell_buffer_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
-                        memmove(shell_buffer, shell_buffer + data_to_write + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
-                        shell_buffer_len = remaining_data;
-                    } else {
-                        shell_buffer_len = 0;
-                    }
-                }
+            }
+            if (nbytes < 0) {
+                perror("Error reading from shell output");
             }
         }
 
@@ -323,20 +253,4 @@ void sigchld_handler(int signum) {
     int saved_errno = errno;
     while (waitpid(-1, NULL, WNOHANG) > 0);
     errno = saved_errno;
-}
-
-int contains_marker(const char *buffer, size_t len) {
-    static char marker[] = COMMAND_COMPLETION_MARKER;
-    size_t marker_len = strlen(marker);
-
-    if (len < marker_len) {
-        return 0;
-    }
-
-    for (size_t i = 0; i <= len - marker_len; i++) {
-        if (strncmp(buffer + i, marker, marker_len) == 0) {
-            return 1;
-        }
-    }
-    return 0;
 }
