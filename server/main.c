@@ -399,7 +399,7 @@ void handle_client(int client_fd) {
         close(shell_to_server[0]);
         close(client_fd);
     }
-
+}
 // Signal handler to reap zombie processes
 void sigchld_handler(int signum)
 {
