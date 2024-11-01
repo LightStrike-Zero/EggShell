@@ -1,17 +1,3 @@
-/**
- * @file server.c
- * @brief PTY-Based Client-Server Shell Implementation
- *
- * This server listens for incoming client connections, authenticates them,
- * spawns a shell within a PTY for each authenticated client, and facilitates
- * bidirectional communication between the client and the shell.
- *
- * Supports both custom clients and standard clients like Telnet.
- *
- * Author: [Your Name]
- * Date: [Date]
- */
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -21,25 +7,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <pty.h>
-#include <utmp.h>
-#include <termios.h>
-#include <fcntl.h>
+#include <errno.h>    // Corrected from <cerrno>
+#include <signal.h>   // Added for signal handling
+#include <sys/wait.h> // Added for waitpid and WNOHANG
 
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 1024
+
 #define USERNAME_LENGTH 30
 #define PASSWORD_LENGTH 12
 #define PORT 40210
-#define MAX_CLIENTS 100
+#define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
-// Authentication structure
-struct UserTable {
+struct ClientInfo
+{
+    int client_socket;
+    pid_t pid;
+};
+
+struct UserTable
+{
     char username[USERNAME_LENGTH];
     char password[PASSWORD_LENGTH];
 } userTable = {"test", "test"};
+
+struct ClientInfo client_list[100]; // Fixed size for simplicity
+int client_count = 0;               // Track the number of clients
 
 // Function prototypes
 int setup_server_socket(int port);
@@ -47,12 +39,10 @@ int authenticate(int client_fd);
 void handle_client(int client_fd);
 ssize_t strip_cr(char *buffer, ssize_t nbytes);
 void sigchld_handler(int signum);
+int contains_marker(const char *buffer, size_t len);
 
-// Main function
 int main()
 {
-    printf("PTY-Based Server Version: 0.27\n");
-
     // Set up the SIGCHLD handler to reap zombie processes
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
@@ -62,15 +52,11 @@ int main()
     if (sigaction(SIGCHLD, &sa, NULL) == -1)
     {
         perror("sigaction");
-        exit(EXIT_FAILURE);
+        exit(1);
     }
 
-    // Initialize server socket
+    // Step 1: Initialize server socket
     int server_fd = setup_server_socket(PORT);
-
-    // Array to keep track of client PIDs (optional, for management)
-    pid_t client_pids[MAX_CLIENTS];
-    memset(client_pids, 0, sizeof(client_pids));
 
     // Main server loop
     while (1)
@@ -78,7 +64,7 @@ int main()
         struct sockaddr_in cli_addr;
         socklen_t clilen = sizeof(cli_addr);
 
-        // Accept a new client connection
+        // Step 2: Accept a new client connection
         int client_fd = accept(server_fd, (struct sockaddr *)&cli_addr, &clilen);
         if (client_fd < 0)
         {
@@ -86,105 +72,82 @@ int main()
             continue;
         }
 
-        printf("Connection from %s:%d\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
-
-        // Fork a new process to handle the client
+        // Step 3: Fork a new process for each client
         pid_t pid = fork();
         if (pid == 0)
-        {
-            // Child process
-            close(server_fd); // Close the listening socket in the child
-            handle_client(client_fd); // Handle client communication
-            exit(EXIT_SUCCESS); // Terminate child after handling client
+        {                             // Child process
+            close(server_fd);         // Close unused server socket in child
+            handle_client(client_fd); // Handle the client
+            exit(0);                  // End child process after handling client
         }
         else if (pid > 0)
         {
-            // Parent process
-            close(client_fd); // Close client socket in parent
-            // Optionally, store client PIDs if needed
-            for (int i = 0; i < MAX_CLIENTS; i++)
+            if (client_count < 100)
             {
-                if (client_pids[i] == 0)
-                {
-                    client_pids[i] = pid;
-                    break;
-                }
+                client_list[client_count].client_socket = client_fd;
+                client_list[client_count].pid = pid;
+                client_count++;
             }
+            else
+            {
+                perror("Max client limit reached.");
+                close(client_fd); // Close the new client socket if limit reached
+            }
+            close(client_fd); // Close unused client socket in parent
         }
         else
         {
-            // Fork failed
             perror("Fork failed");
             close(client_fd);
         }
     }
 
-    // Cleanup (unreachable in this code)
+    // Cleanup
     close(server_fd);
     return 0;
 }
 
-/**
- * @brief Set up the server socket to listen on the specified port.
- *
- * @param port The port number to listen on.
- * @return The file descriptor for the listening socket.
- */
 int setup_server_socket(int port)
 {
     int sockfd;
     struct sockaddr_in serv_addr;
 
-    // Create socket (IPv4, TCP)
+    // Open socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
     {
         perror("Error opening socket");
-        exit(EXIT_FAILURE);
+        exit(1);
     }
 
-    // Allow address reuse
-    int opt = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-    {
-        perror("setsockopt(SO_REUSEADDR) failed");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-
-    // Configure server address structure
+    // Configure server address
     memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET; // IPv4
-    serv_addr.sin_addr.s_addr = INADDR_ANY; // Bind to all interfaces
-    serv_addr.sin_port = htons(port); // Host to network byte order
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    serv_addr.sin_port = htons(port);
 
-    // Bind socket to the specified port
+    // Bind socket to port
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
         perror("Error on binding");
         close(sockfd);
-        exit(EXIT_FAILURE);
+        exit(1);
     }
 
-    // Start listening with a backlog of 5
+    // Start listening on the socket
     if (listen(sockfd, 5) < 0)
     {
         perror("Error on listen");
         close(sockfd);
-        exit(EXIT_FAILURE);
+        exit(1);
     }
 
     printf("Server listening on port %d\n", port);
+
+    // Return the server socket descriptor to main
     return sockfd;
 }
 
-/**
- * @brief Strip carriage return characters from the buffer.
- *
- * @param buffer The input buffer.
- * @param nbytes Number of bytes in the buffer.
- * @return The new length of the buffer after stripping.
- */
 ssize_t strip_cr(char *buffer, ssize_t nbytes)
 {
     ssize_t j = 0;
@@ -195,27 +158,22 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes)
             buffer[j++] = buffer[i];
         }
     }
-    buffer[j] = '\0'; // Null-terminate for safe printing
+    buffer[j] = '\0';                           // Null-terminate for safe printing
+    printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
     return j;
 }
 
-/**
- * @brief Authenticate the client by reading username and password.
- *
- * @param client_fd The client socket file descriptor.
- * @return 1 if authentication is successful, 0 otherwise.
- */
 int authenticate(int client_fd)
 {
-    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 3]; // +2 for space and '\n', +1 for '\0'
+    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 1];  // Additional byte for separating username and password
     int n = read(client_fd, buffer, sizeof(buffer) - 1); // Read into buffer
     if (n <= 0)
     {
-        perror("Error reading from client during authentication");
+        perror("Error reading from client");
         return 0;
     }
 
-    buffer[n] = '\0'; // Null-terminate to ensure it's a proper string
+    buffer[n] = '\0'; // Null-terminate to ensure it’s a proper string
 
     // Strip '\r' from buffer
     ssize_t clean_nbytes = strip_cr(buffer, n);
@@ -226,196 +184,176 @@ int authenticate(int client_fd)
 
     // Parse username and password from buffer
     char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
-    if (sscanf(buffer, "%29s %11s", received_username, received_password) != 2)
-    {
-        const char *invalid_format = "Invalid authentication format. Use: <username> <password>\n";
-        write(client_fd, invalid_format, strlen(invalid_format));
-        printf("Invalid authentication format received.\n");
-        return 0;
-    }
+    sscanf(buffer, "%29s %11s", received_username, received_password);
 
     // Check against the user table
     if (strcmp(received_username, userTable.username) == 0 &&
         strcmp(received_password, userTable.password) == 0)
     {
-        const char *success = "Authentication successful\n";
-        write(client_fd, success, strlen(success));
+        write(client_fd, "Authentication successful\n", strlen("Authentication successful\n"));
         printf("User \"%s\" authenticated successfully.\n", received_username); // Debugging
-        return 1; // Authentication success
+        return 1;                                                               // Authentication success
     }
     else
     {
-        const char *failure = "Authentication failed\n";
-        write(client_fd, failure, strlen(failure));
+        write(client_fd, "Authentication failed\n", strlen("Authentication failed\n"));
         printf("User \"%s\" failed to authenticate.\n", received_username); // Debugging
-        return 0; // Authentication failed
+        return 0;                                                           // Authentication failed
     }
 }
 
-/**
- * @brief Handle communication between the client and the shell within a PTY.
- *
- * @param client_fd The client socket file descriptor.
- */
-void handle_client(int client_fd)
-{
+void handle_client(int client_fd) {
     // Authenticate the client first
-    if (!authenticate(client_fd))
-    {
+    if (!authenticate(client_fd)) {
         close(client_fd);
-        exit(EXIT_FAILURE); // Terminate child process if authentication fails
+        exit(0); // Terminate child process if authentication fails
     }
 
-    // Set the PATH environment variable to ensure the shell can locate commands
-    if (setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1) != 0)
-    {
-        perror("setenv failed");
+    int shell_to_server[2]; // Pipe from shell's stdout/stderr to server
+    int server_to_shell[2]; // Pipe from server to shell's stdin
+
+    // Create pipes for communication with the shell
+    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
+        perror("Pipe creation failed");
         close(client_fd);
-        exit(EXIT_FAILURE);
+        exit(1);
     }
 
-    // Allocate a PTY and fork the shell
-    int master_fd;
-    pid_t pid = forkpty(&master_fd, NULL, NULL, NULL);
-    if (pid < 0)
-    {
-        perror("forkpty failed");
-        close(client_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    if (pid == 0)
-    {
-        // Child process: execute bash in interactive mode
-        execlp("/bin/bash", "bash", "-i", "--noprofile", "--norc", NULL);
-        // If execlp returns, an error occurred
-        perror("execlp failed: No such file or directory");
-        exit(EXIT_FAILURE);
-    }
-
-    // Parent process: communicate between client_fd and master_fd
-    fd_set read_fds;
-    int max_fd = (client_fd > master_fd) ? client_fd : master_fd;
-    char buffer[BUFFER_SIZE];
-    ssize_t nbytes;
-
-    printf("Shell process started with PID %d\n", pid);
-
-    while (1)
-    {
-        FD_ZERO(&read_fds);
-        FD_SET(client_fd, &read_fds);
-        FD_SET(master_fd, &read_fds);
-
-        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-        if (activity < 0)
-        {
-            if (errno == EINTR)
-                continue; // Interrupted by signal, restart select
-            perror("select error");
-            break;
+    pid_t pid = fork();
+    if (pid == 0) { // Child process (shell)
+        // Redirect shell's stdin, stdout, and stderr to the pipes
+        if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
+            dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
+            dup2(shell_to_server[1], STDERR_FILENO) == -1) {
+            perror("dup2 failed");
+            exit(1);
         }
 
-        // Data from client to shell
-        if (FD_ISSET(client_fd, &read_fds))
-        {
-            nbytes = read(client_fd, buffer, sizeof(buffer));
-            if (nbytes > 0)
-            {
-                // Strip '\r' if present (handles Telnet's CRLF)
-                ssize_t clean_nbytes = strip_cr(buffer, nbytes);
-                buffer[clean_nbytes] = '\0';
+        close(server_to_shell[1]); // Child doesn't write to server_to_shell
+        close(shell_to_server[0]); // Child doesn't read from shell_to_server
+        close(client_fd);          // Child doesn't need client's socket
 
-                // Debugging: Log the command received
-                printf("Received from client: \"%s\"\n", buffer);
+        // Execute the shell in non-interactive mode
+        execlp("/bin/bash", "bash", "--noprofile", "--norc", NULL);
+        perror("Failed to execute shell");
+        exit(1);
+    } else if (pid > 0) { // Parent process (server handling client)
+        close(server_to_shell[0]); // Parent doesn't read from server_to_shell
+        close(shell_to_server[1]); // Parent doesn't write to shell_to_server
 
-                // Optional: Handle special commands like "exit" or "quit"
-                if (strncmp(buffer, "exit", 4) == 0 ||
-                    strncmp(buffer, "quit", 4) == 0 ||
-                    strncmp(buffer, "logout", 6) == 0)
-                {
-                    const char *disconnect_msg = "Disconnecting...\n";
-                    write(client_fd, disconnect_msg, strlen(disconnect_msg));
-                    printf("Received termination command from client.\n");
+        fd_set read_fds;
+        int max_fd = (client_fd > shell_to_server[0]) ? client_fd : shell_to_server[0];
+        char buffer[BUFFER_SIZE];
+        ssize_t nbytes; // **Add this line to declare nbytes**
+
+        while (1) {
+            // Read command from client
+            nbytes = read(client_fd, buffer, sizeof(buffer) - 1);
+            if (nbytes <= 0) {
+                // Handle disconnection or error
+                break;
+            }
+            buffer[nbytes] = '\0'; // Null-terminate
+
+            // Strip '\r' from buffer
+            ssize_t clean_nbytes = strip_cr(buffer, nbytes);
+            buffer[clean_nbytes] = '\0'; // Ensure null-termination
+
+            // Check for termination command
+            if (strcmp(buffer, "exit\n") == 0 || strcmp(buffer, "quit\n") == 0) {
+                write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
+                printf("Received termination command from client.\n");
+                break;
+            }
+
+            // Append the marker to the command
+            const char *marker = "; echo __COMMAND_COMPLETED__\n";
+            char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
+            snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", buffer, marker);
+
+            // Write the modified command to the shell's stdin
+            ssize_t total_written = 0;
+            ssize_t command_len = strlen(command_with_marker);
+            while (total_written < command_len) {
+                ssize_t bytes_written = write(server_to_shell[1], command_with_marker + total_written, command_len - total_written);
+                if (bytes_written <= 0) {
+                    perror("Write error to shell");
+                    break;
+                }
+                total_written += bytes_written;
+            }
+
+            // Read from the shell and send output to the client
+            char shell_buffer[BUFFER_SIZE];
+            size_t shell_buffer_len = 0;
+            int command_completed = 0;
+
+            while (!command_completed) {
+                FD_ZERO(&read_fds);
+                FD_SET(shell_to_server[0], &read_fds);
+
+                int activity = select(shell_to_server[0] + 1, &read_fds, NULL, NULL, NULL);
+                if (activity < 0 && errno != EINTR) {
+                    perror("Select error");
                     break;
                 }
 
-                // Write the received data to the shell's PTY
-                ssize_t total_written = 0;
-                while (total_written < clean_nbytes)
-                {
-                    ssize_t bytes_written = write(master_fd, buffer + total_written, clean_nbytes - total_written);
-                    if (bytes_written <= 0)
-                    {
-                        perror("write to master_fd failed");
+                if (FD_ISSET(shell_to_server[0], &read_fds)) {
+                    // Read data from the shell
+                    nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
+                    if (nbytes <= 0) {
+                        // Handle shell termination or error
                         break;
                     }
-                    total_written += bytes_written;
+
+                    shell_buffer_len += nbytes;
+                    shell_buffer[shell_buffer_len] = '\0';
+
+                    // Send data to client
+                    ssize_t total_written = 0;
+                    size_t data_to_write = shell_buffer_len;
+
+                    // Optionally remove the marker from the output sent to the client
+                    char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
+                    if (marker_position != NULL) {
+                        command_completed = 1;
+                        data_to_write = marker_position - shell_buffer;
+                    }
+
+                    while (total_written < data_to_write) {
+                        ssize_t bytes_written = write(client_fd, shell_buffer + total_written, data_to_write - total_written);
+                        if (bytes_written <= 0) {
+                            perror("Write error to client");
+                            break;
+                        }
+                        total_written += bytes_written;
+                    }
+
+                    // If the marker was found, handle any remaining data
+                    if (command_completed && (shell_buffer_len > data_to_write + strlen(COMMAND_COMPLETION_MARKER))) {
+                        size_t remaining_data = shell_buffer_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
+                        memmove(shell_buffer, shell_buffer + data_to_write + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
+                        shell_buffer_len = remaining_data;
+                    } else {
+                        shell_buffer_len = 0; // Reset buffer for next read
+                    }
                 }
-            }
-            else if (nbytes == 0)
-            {
-                // Client disconnected
-                printf("Client disconnected.\n");
-                break;
-            }
-            else
-            {
-                perror("read from client_fd failed");
-                break;
             }
         }
 
-        // Data from shell to client
-        if (FD_ISSET(master_fd, &read_fds))
-        {
-            nbytes = read(master_fd, buffer, sizeof(buffer));
-            if (nbytes > 0)
-            {
-                // Write the data to the client
-                ssize_t total_written = 0;
-                while (total_written < nbytes)
-                {
-                    ssize_t bytes_written = write(client_fd, buffer + total_written, nbytes - total_written);
-                    if (bytes_written <= 0)
-                    {
-                        perror("write to client_fd failed");
-                        break;
-                    }
-                    total_written += bytes_written;
-                }
-
-                // Optional: Log the output sent to client
-                printf("Sent to client: \"%.*s\"\n", (int)nbytes, buffer);
-            }
-            else if (nbytes == 0)
-            {
-                // Shell closed
-                printf("Shell closed the connection.\n");
-                break;
-            }
-            else
-            {
-                perror("read from master_fd failed");
-                break;
-            }
-        }
+        // Close all open descriptors
+        close(server_to_shell[1]);
+        close(shell_to_server[0]);
+        close(client_fd);
+    } else {
+        perror("Fork failed");
+        close(client_fd);
+        exit(1);
     }
-
-    // Clean up
-    close(master_fd);
-    close(client_fd);
-    // Optionally, terminate the shell process if it's still running
-    kill(pid, SIGKILL);
-    waitpid(pid, NULL, 0);
-    printf("Client handler terminated.\n");
 }
 
-/**
- * @brief Signal handler to reap zombie processes.
- *
- * @param signum The signal number.
- */
+
+// Signal handler to reap zombie processes
 void sigchld_handler(int signum)
 {
     // Save and restore errno to avoid side effects
@@ -423,4 +361,20 @@ void sigchld_handler(int signum)
     while (waitpid(-1, NULL, WNOHANG) > 0)
         ;
     errno = saved_errno;
+}
+
+int contains_marker(const char *buffer, size_t len) {
+    static char marker[] = COMMAND_COMPLETION_MARKER;
+    size_t marker_len = strlen(marker);
+
+    if (len < marker_len) {
+        return 0;
+    }
+
+    for (size_t i = 0; i <= len - marker_len; i++) {
+        if (strncmp(buffer + i, marker, marker_len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
