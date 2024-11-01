@@ -7,9 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>    // Corrected from <cerrno>
-#include <signal.h>   // Added for signal handling
-#include <sys/wait.h> // Added for waitpid and WNOHANG
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <pty.h>     // For PTY functions
+#include <utmp.h>
+#include <termios.h>
+#include <fcntl.h>
 
 #define BUFFER_SIZE 1024
 
@@ -157,13 +161,13 @@ ssize_t strip_cr(char *buffer, ssize_t nbytes)
         }
     }
     buffer[j] = '\0';                           // Null-terminate for safe printing
-    printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
+    // printf("After strip_cr: \"%s\"\n", buffer); // Debugging statement
     return j;
 }
 
 int authenticate(int client_fd)
 {
-    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 1];  // Additional byte for separating username and password
+    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 2];  // Additional bytes for separating username and password
     int n = read(client_fd, buffer, sizeof(buffer) - 1); // Read into buffer
     if (n <= 0)
     {
@@ -176,9 +180,6 @@ int authenticate(int client_fd)
     // Strip '\r' from buffer
     ssize_t clean_nbytes = strip_cr(buffer, n);
     buffer[clean_nbytes] = '\0'; // Ensure null-termination after stripping
-
-    // Debugging: Print the stripped input
-    printf("Authentication input after strip_cr: \"%s\"\n", buffer);
 
     // Parse username and password from buffer
     char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
@@ -209,57 +210,43 @@ void handle_client(int client_fd)
         exit(0); // Terminate child process if authentication fails
     }
 
-    int shell_to_server[2]; // Pipe from shell's stdout/stderr to server
-    int server_to_shell[2]; // Pipe from server to shell's stdin
+    int master_fd; // File descriptor for the master side of the PTY
+    pid_t shell_pid;
 
-    // Create pipes for communication with the shell
-    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1)
+    // Fork a new process with a PTY
+    shell_pid = forkpty(&master_fd, NULL, NULL, NULL);
+    if (shell_pid == -1)
     {
-        perror("Pipe creation failed");
+        perror("forkpty failed");
         close(client_fd);
         exit(1);
     }
 
-    pid_t pid = fork();
-    if (pid == 0)
+    if (shell_pid == 0)
     { // Child process (shell)
-        // Redirect shell's stdin, stdout, and stderr to the pipes
-        if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
-            dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
-            dup2(shell_to_server[1], STDERR_FILENO) == -1)
-        {
-            perror("dup2 failed");
-            exit(1);
-        }
-
-        // **Implementing Number 10: Close unused ends in child**
-        close(server_to_shell[1]); // Child doesn't write to server_to_shell
-        close(shell_to_server[0]); // Child doesn't read from shell_to_server
-        close(client_fd);          // Child doesn't need client's socket
-
-        // Execute the shell in non-interactive mode
-        execlp("/bin/bash", "bash", "--noprofile", "--norc", NULL);
+        // Execute the shell in interactive mode
+        execlp("/bin/bash", "bash", "--noprofile", "--norc", "-i", NULL);
         perror("Failed to execute shell");
         exit(1);
     }
-    else if (pid > 0)
+    else
     { // Parent process (server handling client)
-        // **Implementing Number 10: Close unused ends in parent**
-        close(server_to_shell[0]); // Parent doesn't read from server_to_shell
-        close(shell_to_server[1]); // Parent doesn't write to shell_to_server
-
         fd_set read_fds;
-        int max_fd = (client_fd > shell_to_server[0]) ? client_fd : shell_to_server[0];
+        int max_fd = (client_fd > master_fd) ? client_fd : master_fd;
         char buffer[BUFFER_SIZE];
         ssize_t nbytes;
+
+        // Set master_fd and client_fd to non-blocking mode (optional, can help prevent blocking)
+        // fcntl(master_fd, F_SETFL, O_NONBLOCK);
+        // fcntl(client_fd, F_SETFL, O_NONBLOCK);
 
         while (1)
         {
             FD_ZERO(&read_fds);
             FD_SET(client_fd, &read_fds);
-            FD_SET(shell_to_server[0], &read_fds);
+            FD_SET(master_fd, &read_fds);
 
-            // Wait for data on either the client socket or the shell output
+            // Wait for data on either the client socket or the shell PTY
             int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
             if (activity < 0 && errno != EINTR)
             {
@@ -267,7 +254,7 @@ void handle_client(int client_fd)
                 break;
             }
 
-            // **Implementing Number 8: Handle partial reads/writes from client to shell**
+            // Data from client to shell
             if (FD_ISSET(client_fd, &read_fds))
             {
                 nbytes = read(client_fd, buffer, sizeof(buffer));
@@ -285,54 +272,24 @@ void handle_client(int client_fd)
                     break;
                 }
 
-                // Strip '\r' from buffer
-                ssize_t clean_nbytes = strip_cr(buffer, nbytes);
-                buffer[clean_nbytes] = '\0'; // Ensure null-termination
-
-                // Debugging: Print the command being sent to the shell
-                printf("Sending to shell: \"%s\"\n", buffer);
-
-                // Check for termination command
-                if (strcmp(buffer, "Bye bye") == 0)
-                {
-                    write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
-                    printf("Received termination command from client.\n");
-                    break;
-                }
-
-                // Skip empty commands
-                if (clean_nbytes == 0)
-                {
-                    printf("Received empty command. Skipping.\n");
-                    continue;
-                }
-
-                // Add newline to buffer before writing to shell
-                if (buffer[clean_nbytes - 1] != '\n')
-                {
-                    buffer[clean_nbytes] = '\n';
-                    clean_nbytes += 1;
-                    buffer[clean_nbytes] = '\0'; // Ensure null-termination
-                }
-
-                // Write cleaned data to the shell's stdin
+                // Write data to the shell's PTY
                 ssize_t total_written = 0;
-                while (total_written < clean_nbytes)
+                while (total_written < nbytes)
                 {
-                    ssize_t bytes_written = write(server_to_shell[1], buffer + total_written, clean_nbytes - total_written);
+                    ssize_t bytes_written = write(master_fd, buffer + total_written, nbytes - total_written);
                     if (bytes_written <= 0)
                     {
-                        perror("Write error to shell");
+                        perror("Write error to shell PTY");
                         break;
                     }
                     total_written += bytes_written;
                 }
             }
 
-            // **Implementing Number 8: Handle partial reads/writes from shell to client**
-            if (FD_ISSET(shell_to_server[0], &read_fds))
+            // Data from shell to client
+            if (FD_ISSET(master_fd, &read_fds))
             {
-                nbytes = read(shell_to_server[0], buffer, sizeof(buffer));
+                nbytes = read(master_fd, buffer, sizeof(buffer));
                 if (nbytes <= 0)
                 {
                     if (nbytes == 0)
@@ -342,13 +299,10 @@ void handle_client(int client_fd)
                     }
                     else
                     {
-                        perror("Read error from shell");
+                        perror("Read error from shell PTY");
                     }
                     break;
                 }
-
-                // Debugging: Print the data received from the shell
-                printf("Received from shell: \"%.*s\"\n", (int)nbytes, buffer);
 
                 // Write shell output to the client
                 ssize_t total_written = 0;
@@ -365,16 +319,9 @@ void handle_client(int client_fd)
             }
         }
 
-        // Close all open descriptors
-        close(server_to_shell[1]);
-        close(shell_to_server[0]);
+        // Close the master PTY and client socket
+        close(master_fd);
         close(client_fd);
-    }
-    else
-    {
-        perror("Fork failed");
-        close(client_fd);
-        exit(1);
     }
 }
 
