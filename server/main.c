@@ -7,9 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
-#include <errno.h>    // Corrected from <cerrno>
-#include <signal.h>   // Added for signal handling
-#include <sys/wait.h> // Added for waitpid and WNOHANG
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define BUFFER_SIZE 4096 // Increased buffer size for handling larger outputs
 
@@ -29,9 +29,6 @@ struct UserTable
     char username[USERNAME_LENGTH];
     char password[PASSWORD_LENGTH];
 } userTable = {"test", "test"};
-
-struct ClientInfo client_list[100]; // Fixed size for simplicity
-int client_count = 0;               // Track the number of clients
 
 // Function prototypes
 int setup_server_socket(int port);
@@ -81,17 +78,7 @@ int main()
         }
         else if (pid > 0)
         {
-            if (client_count < 100)
-            {
-                client_list[client_count].client_socket = client_fd;
-                client_list[client_count].pid = pid;
-                client_count++;
-            }
-            else
-            {
-                perror("Max client limit reached.");
-                close(client_fd); // Close the new client socket if limit reached
-            }
+            // Parent process
             close(client_fd); // Close unused client socket in parent
         }
         else
@@ -256,8 +243,14 @@ void handle_client(int client_fd) {
         char shell_buffer[BUFFER_SIZE];
         ssize_t nbytes;
 
+        // Buffers for accumulating client input and shell output
+        char client_input_buffer[BUFFER_SIZE];
+        size_t client_input_len = 0;
+
+        char shell_output_buffer[BUFFER_SIZE];
+        size_t shell_output_len = 0;
+
         int command_in_progress = 0;
-        size_t shell_buffer_len = 0;
 
         while (1)
         {
@@ -275,7 +268,7 @@ void handle_client(int client_fd) {
             // **Data from shell to client**
             if (FD_ISSET(shell_to_server[0], &read_fds))
             {
-                nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
+                nbytes = read(shell_to_server[0], shell_output_buffer + shell_output_len, sizeof(shell_output_buffer) - shell_output_len - 1);
                 if (nbytes <= 0)
                 {
                     // Handle shell termination or error
@@ -283,54 +276,59 @@ void handle_client(int client_fd) {
                     break;
                 }
 
-                shell_buffer_len += nbytes;
-                shell_buffer[shell_buffer_len] = '\0';
+                shell_output_len += nbytes;
+                shell_output_buffer[shell_output_len] = '\0';
 
                 // **Debugging: Print received data from shell**
-                printf("Received from shell: \"%s\"\n", shell_buffer);
+                // printf("Received from shell: \"%s\"\n", shell_output_buffer); // Uncomment for debugging
 
                 // **Check for the completion marker**
-                char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
-                size_t data_to_write = shell_buffer_len;
-
+                char *marker_position = strstr(shell_output_buffer, COMMAND_COMPLETION_MARKER);
                 if (marker_position != NULL)
                 {
-                    data_to_write = marker_position - shell_buffer;
-                    command_in_progress = 0; // Command completed
+                    size_t data_to_write = marker_position - shell_output_buffer;
+                    // Send data up to the marker to the client
+                    if (data_to_write > 0)
+                    {
+                        if (write(client_fd, shell_output_buffer, data_to_write) == -1)
+                        {
+                            perror("Write error to client");
+                            break;
+                        }
+                    }
 
                     // **Debugging: Indicate marker found**
-                    printf("Command completed. Marker detected.\n");
-                }
-                else
-                {
-                    shell_buffer_len = 0; // Reset buffer for next read
-                }
+                    // printf("Command completed. Marker detected.\n"); // Uncomment for debugging
 
-                // **Send data to client**
-                ssize_t total_written = 0;
-                while (total_written < data_to_write)
-                {
-                    ssize_t bytes_written = write(client_fd, shell_buffer + total_written, data_to_write - total_written);
-                    if (bytes_written <= 0)
-                    {
-                        perror("Write error to client");
-                        break;
-                    }
-                    total_written += bytes_written;
-                }
-
-                // **Handle remaining data after the marker**
-                if (marker_position != NULL)
-                {
-                    size_t remaining_data = shell_buffer_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
+                    // Handle any remaining data after the marker
+                    size_t remaining_data = shell_output_len - (data_to_write + strlen(COMMAND_COMPLETION_MARKER));
                     if (remaining_data > 0)
                     {
-                        memmove(shell_buffer, marker_position + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
-                        shell_buffer_len = remaining_data;
+                        memmove(shell_output_buffer, marker_position + strlen(COMMAND_COMPLETION_MARKER), remaining_data);
+                        shell_output_len = remaining_data;
+                        shell_output_buffer[remaining_data] = '\0';
                     }
                     else
                     {
-                        shell_buffer_len = 0;
+                        shell_output_len = 0;
+                        shell_output_buffer[0] = '\0';
+                    }
+
+                    // Reset command_in_progress flag
+                    command_in_progress = 0;
+                }
+                else
+                {
+                    // No marker found yet, send all data to client
+                    if (shell_output_len > 0)
+                    {
+                        if (write(client_fd, shell_output_buffer, shell_output_len) == -1)
+                        {
+                            perror("Write error to client");
+                            break;
+                        }
+                        shell_output_len = 0;
+                        shell_output_buffer[0] = '\0';
                     }
                 }
             }
@@ -338,36 +336,55 @@ void handle_client(int client_fd) {
             // **Data from client to shell**
             if (FD_ISSET(client_fd, &read_fds))
             {
-                if (!command_in_progress)
+                nbytes = read(client_fd, client_buffer, sizeof(client_buffer) - 1);
+                if (nbytes <= 0)
                 {
-                    nbytes = read(client_fd, client_buffer, sizeof(client_buffer) - 1);
-                    if (nbytes <= 0)
-                    {
-                        // Handle client disconnection or error
-                        printf("Client disconnected or error occurred.\n");
-                        break;
-                    }
-                    client_buffer[nbytes] = '\0'; // Null-terminate
+                    // Handle client disconnection or error
+                    printf("Client disconnected or error occurred.\n");
+                    break;
+                }
+                client_buffer[nbytes] = '\0'; // Null-terminate
 
-                    // **Strip '\r' from buffer**
-                    ssize_t clean_nbytes = strip_cr(client_buffer, nbytes);
-                    client_buffer[clean_nbytes] = '\0'; // Ensure null-termination
+                // **Accumulate client input**
+                if (client_input_len + nbytes >= sizeof(client_input_buffer))
+                {
+                    fprintf(stderr, "Client input buffer overflow.\n");
+                    break;
+                }
+                memcpy(client_input_buffer + client_input_len, client_buffer, nbytes);
+                client_input_len += nbytes;
+                client_input_buffer[client_input_len] = '\0';
+
+                // **Check if a full command is received (newline)**
+                char *newline_pos = strchr(client_input_buffer, '\n');
+                while (newline_pos != NULL)
+                {
+                    size_t command_length = newline_pos - client_input_buffer + 1; // Include newline
+
+                    char command[BUFFER_SIZE];
+                    memcpy(command, client_input_buffer, command_length);
+                    command[command_length] = '\0';
+
+                    // **Strip '\r' from command**
+                    ssize_t clean_nbytes = strip_cr(command, command_length);
+                    command[clean_nbytes] = '\0'; // Ensure null-termination
 
                     // **Check for termination command**
-                    if (strcmp(client_buffer, "exit\n") == 0 || strcmp(client_buffer, "quit\n") == 0)
+                    if (strcmp(command, "exit") == 0 || strcmp(command, "quit") == 0)
                     {
                         write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
                         printf("Received termination command from client.\n");
-                        break;
+                        close(client_fd);
+                        exit(0);
                     }
 
                     // **Append the marker to the command**
-                    const char *marker = "; echo __COMMAND_COMPLETED__\n";
+                    const char *marker = "; echo " COMMAND_COMPLETION_MARKER "\n";
                     char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
-                    snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", client_buffer, marker);
+                    snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", command, marker);
 
                     // **Debugging: Print the command sent to shell**
-                    printf("Sending to shell: \"%s\"\n", command_with_marker);
+                    // printf("Sending to shell: \"%s\"\n", command_with_marker); // Uncomment for debugging
 
                     // **Write the modified command to the shell's stdin**
                     ssize_t total_written = 0;
@@ -383,13 +400,25 @@ void handle_client(int client_fd) {
                         total_written += bytes_written;
                     }
 
+                    // **Mark that a command is in progress**
                     command_in_progress = 1;
-                    shell_buffer_len = 0; // Reset shell buffer
-                }
-                else
-                {
-                    // **Optional:** Inform the client that a command is already in progress
-                    // For simplicity, we can ignore additional input until the current command completes
+
+                    // **Remove the processed command from the input buffer**
+                    size_t remaining = client_input_len - command_length;
+                    if (remaining > 0)
+                    {
+                        memmove(client_input_buffer, client_input_buffer + command_length, remaining);
+                        client_input_len = remaining;
+                        client_input_buffer[client_input_len] = '\0';
+                    }
+                    else
+                    {
+                        client_input_len = 0;
+                        client_input_buffer[0] = '\0';
+                    }
+
+                    // Check if there is another newline in the remaining buffer
+                    newline_pos = strchr(client_input_buffer, '\n');
                 }
             }
         }
