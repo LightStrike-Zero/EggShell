@@ -22,7 +22,6 @@
 #define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
 float version = 0.26;
-
 struct ClientInfo
 {
     int client_socket;
@@ -228,12 +227,17 @@ void handle_client(int client_fd)
         exit(1);
     }
 
+    // **Set the PATH environment variable before forking**
+    if (setenv("PATH", "/usr/bin:/bin", 1) == -1)
+    {
+        perror("setenv failed");
+        close(client_fd);
+        exit(1);
+    }
+
     pid_t pid = fork();
     if (pid == 0)
     { // Child process (shell)
-        // Set the PATH environment variable
-        setenv("PATH", "/usr/bin:/bin", 1);
-
         // Redirect shell's stdin, stdout, and stderr to the pipes
         if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
             dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
@@ -247,7 +251,7 @@ void handle_client(int client_fd)
         close(shell_to_server[0]); // Child doesn't read from shell_to_server
         close(client_fd);          // Child doesn't need client's socket
 
-        // Execute the shell with line-buffered stdout
+        // **Execute the shell with line-buffered stdout**
         execlp("stdbuf", "stdbuf", "-oL", "bash", "--noprofile", "--norc", NULL);
         perror("Failed to execute shell with stdbuf");
         exit(1);
@@ -279,20 +283,21 @@ void handle_client(int client_fd)
                 break;
             }
 
-            // Data from shell to client
+            // **Data from shell to client**
             if (FD_ISSET(shell_to_server[0], &read_fds))
             {
                 nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
                 if (nbytes <= 0)
                 {
                     // Handle shell termination or error
+                    printf("Shell process terminated or error occurred.\n");
                     break;
                 }
 
                 shell_buffer_len += nbytes;
                 shell_buffer[shell_buffer_len] = '\0';
 
-                // Check for the completion marker
+                // **Check for the completion marker**
                 char *marker_position = strstr(shell_buffer, COMMAND_COMPLETION_MARKER);
                 size_t data_to_write = shell_buffer_len;
 
@@ -312,13 +317,16 @@ void handle_client(int client_fd)
                     {
                         shell_buffer_len = 0;
                     }
+
+                    // **Debugging: Indicate marker found**
+                    printf("Command completed. Marker detected.\n");
                 }
                 else
                 {
                     shell_buffer_len = 0; // Reset buffer for next read
                 }
 
-                // Send data to client
+                // **Send data to client**
                 ssize_t total_written = 0;
                 while (total_written < data_to_write)
                 {
@@ -332,7 +340,7 @@ void handle_client(int client_fd)
                 }
             }
 
-            // Data from client to shell
+            // **Data from client to shell**
             if (FD_ISSET(client_fd, &read_fds))
             {
                 if (!command_in_progress)
@@ -341,15 +349,16 @@ void handle_client(int client_fd)
                     if (nbytes <= 0)
                     {
                         // Handle client disconnection or error
+                        printf("Client disconnected or error occurred.\n");
                         break;
                     }
                     client_buffer[nbytes] = '\0'; // Null-terminate
 
-                    // Strip '\r' from buffer
+                    // **Strip '\r' from buffer**
                     ssize_t clean_nbytes = strip_cr(client_buffer, nbytes);
                     client_buffer[clean_nbytes] = '\0'; // Ensure null-termination
 
-                    // Check for termination command
+                    // **Check for termination command**
                     if (strcmp(client_buffer, "exit\n") == 0 || strcmp(client_buffer, "quit\n") == 0)
                     {
                         write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
@@ -357,12 +366,15 @@ void handle_client(int client_fd)
                         break;
                     }
 
-                    // Append the marker to the command
+                    // **Append the marker to the command**
                     const char *marker = "; echo __COMMAND_COMPLETED__\n";
                     char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
                     snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", client_buffer, marker);
 
-                    // Write the modified command to the shell's stdin
+                    // **Debugging: Print the command sent to shell**
+                    printf("Sending to shell: %s", command_with_marker);
+
+                    // **Write the modified command to the shell's stdin**
                     ssize_t total_written = 0;
                     ssize_t command_len = strlen(command_with_marker);
                     while (total_written < command_len)
@@ -381,7 +393,7 @@ void handle_client(int client_fd)
                 }
                 else
                 {
-                    // Optionally, you can inform the client that the previous command is still running
+                    // **Optional:** Inform the client that a command is already in progress
                     // For simplicity, we can ignore additional input until the current command completes
                 }
             }
@@ -392,14 +404,6 @@ void handle_client(int client_fd)
         close(shell_to_server[0]);
         close(client_fd);
     }
-    else
-    {
-        perror("Fork failed");
-        close(client_fd);
-        exit(1);
-    }
-}
-
 
 // Signal handler to reap zombie processes
 void sigchld_handler(int signum)
