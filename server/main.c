@@ -266,6 +266,14 @@ void handle_client(int client_fd)
         exit(EXIT_FAILURE); // Terminate child process if authentication fails
     }
 
+    // Set the PATH environment variable to ensure the shell can locate commands
+    if (setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1) != 0)
+    {
+        perror("setenv failed");
+        close(client_fd);
+        exit(EXIT_FAILURE);
+    }
+
     // Allocate a PTY and fork the shell
     int master_fd;
     pid_t pid = forkpty(&master_fd, NULL, NULL, NULL);
@@ -278,10 +286,10 @@ void handle_client(int client_fd)
 
     if (pid == 0)
     {
-        // Child process: execute the shell
-        // Replace with your custom shell if needed
-        execlp("./custom_shell", "./custom_shell", NULL);
-        perror("execlp failed");
+        // Child process: execute bash in interactive mode
+        execlp("/bin/bash", "bash", "-i", "--noprofile", "--norc", NULL);
+        // If execlp returns, an error occurred
+        perror("execlp failed: No such file or directory");
         exit(EXIT_FAILURE);
     }
 
@@ -314,7 +322,7 @@ void handle_client(int client_fd)
             nbytes = read(client_fd, buffer, sizeof(buffer));
             if (nbytes > 0)
             {
-                // Strip '\r' if present
+                // Strip '\r' if present (handles Telnet's CRLF)
                 ssize_t clean_nbytes = strip_cr(buffer, nbytes);
                 buffer[clean_nbytes] = '\0';
 
