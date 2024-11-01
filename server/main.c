@@ -21,7 +21,7 @@
 #define PORT 40210
 #define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
-float version = 0.25;
+float version = 0.26;
 
 struct ClientInfo
 {
@@ -269,16 +269,8 @@ void handle_client(int client_fd)
         while (1)
         {
             FD_ZERO(&read_fds);
-
-            if (!command_in_progress)
-            {
-                FD_SET(client_fd, &read_fds);
-            }
-
-            if (command_in_progress)
-            {
-                FD_SET(shell_to_server[0], &read_fds);
-            }
+            FD_SET(client_fd, &read_fds);
+            FD_SET(shell_to_server[0], &read_fds);
 
             int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
             if (activity < 0 && errno != EINTR)
@@ -287,54 +279,8 @@ void handle_client(int client_fd)
                 break;
             }
 
-            // Data from client to shell
-            if (FD_ISSET(client_fd, &read_fds))
-            {
-                nbytes = read(client_fd, client_buffer, sizeof(client_buffer) - 1);
-                if (nbytes <= 0)
-                {
-                    // Handle client disconnection or error
-                    break;
-                }
-                client_buffer[nbytes] = '\0'; // Null-terminate
-
-                // Strip '\r' from buffer
-                ssize_t clean_nbytes = strip_cr(client_buffer, nbytes);
-                client_buffer[clean_nbytes] = '\0'; // Ensure null-termination
-
-                // Check for termination command
-                if (strcmp(client_buffer, "exit\n") == 0 || strcmp(client_buffer, "quit\n") == 0)
-                {
-                    write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
-                    printf("Received termination command from client.\n");
-                    break;
-                }
-
-                // Append the marker to the command
-                const char *marker = "; echo __COMMAND_COMPLETED__\n";
-                char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
-                snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", client_buffer, marker);
-
-                // Write the modified command to the shell's stdin
-                ssize_t total_written = 0;
-                ssize_t command_len = strlen(command_with_marker);
-                while (total_written < command_len)
-                {
-                    ssize_t bytes_written = write(server_to_shell[1], command_with_marker + total_written, command_len - total_written);
-                    if (bytes_written <= 0)
-                    {
-                        perror("Write error to shell");
-                        break;
-                    }
-                    total_written += bytes_written;
-                }
-
-                command_in_progress = 1;
-                shell_buffer_len = 0; // Reset shell buffer
-            }
-
             // Data from shell to client
-            if (command_in_progress && FD_ISSET(shell_to_server[0], &read_fds))
+            if (FD_ISSET(shell_to_server[0], &read_fds))
             {
                 nbytes = read(shell_to_server[0], shell_buffer + shell_buffer_len, sizeof(shell_buffer) - shell_buffer_len - 1);
                 if (nbytes <= 0)
@@ -385,6 +331,60 @@ void handle_client(int client_fd)
                     total_written += bytes_written;
                 }
             }
+
+            // Data from client to shell
+            if (FD_ISSET(client_fd, &read_fds))
+            {
+                if (!command_in_progress)
+                {
+                    nbytes = read(client_fd, client_buffer, sizeof(client_buffer) - 1);
+                    if (nbytes <= 0)
+                    {
+                        // Handle client disconnection or error
+                        break;
+                    }
+                    client_buffer[nbytes] = '\0'; // Null-terminate
+
+                    // Strip '\r' from buffer
+                    ssize_t clean_nbytes = strip_cr(client_buffer, nbytes);
+                    client_buffer[clean_nbytes] = '\0'; // Ensure null-termination
+
+                    // Check for termination command
+                    if (strcmp(client_buffer, "exit\n") == 0 || strcmp(client_buffer, "quit\n") == 0)
+                    {
+                        write(client_fd, "Disconnecting...\n", strlen("Disconnecting...\n"));
+                        printf("Received termination command from client.\n");
+                        break;
+                    }
+
+                    // Append the marker to the command
+                    const char *marker = "; echo __COMMAND_COMPLETED__\n";
+                    char command_with_marker[BUFFER_SIZE + 50]; // Adjust size as needed
+                    snprintf(command_with_marker, sizeof(command_with_marker), "%s%s", client_buffer, marker);
+
+                    // Write the modified command to the shell's stdin
+                    ssize_t total_written = 0;
+                    ssize_t command_len = strlen(command_with_marker);
+                    while (total_written < command_len)
+                    {
+                        ssize_t bytes_written = write(server_to_shell[1], command_with_marker + total_written, command_len - total_written);
+                        if (bytes_written <= 0)
+                        {
+                            perror("Write error to shell");
+                            break;
+                        }
+                        total_written += bytes_written;
+                    }
+
+                    command_in_progress = 1;
+                    shell_buffer_len = 0; // Reset shell buffer
+                }
+                else
+                {
+                    // Optionally, you can inform the client that the previous command is still running
+                    // For simplicity, we can ignore additional input until the current command completes
+                }
+            }
         }
 
         // Close all open descriptors
@@ -399,6 +399,7 @@ void handle_client(int client_fd)
         exit(1);
     }
 }
+
 
 // Signal handler to reap zombie processes
 void sigchld_handler(int signum)
