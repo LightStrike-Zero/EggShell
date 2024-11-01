@@ -165,57 +165,31 @@ int authenticate(int client_fd) {
 }
 
 void handle_client(int client_fd) {
-    DEBUG_PRINT("Client connected with fd: %d\n", client_fd);
+    int pty_fd;
+    pid_t pid = forkpty(&pty_fd, NULL, NULL, NULL); // Create a PTY
 
-    if (!authenticate(client_fd)) {
-        DEBUG_PRINT("Authentication failed for client fd: %d\n", client_fd);
-        close(client_fd);
-        return;
-    }
-    DEBUG_PRINT("Authentication successful for client fd: %d\n", client_fd);
-
-    int in_pipe[2], out_pipe[2];
-    if (pipe(in_pipe) == -1 || pipe(out_pipe) == -1) {
-        perror("pipe");
-        close(client_fd);
-        return;
-    }
-
-    pid_t pid = fork();
     if (pid == 0) {
-        // Child process: execute egg_shell
+        // Child process: set up egg_shell in the PTY
         DEBUG_PRINT("Forked child process for client fd: %d\n", client_fd);
 
-        // Redirect stdin and stdout to the pipes
-        dup2(in_pipe[0], STDIN_FILENO);
-        dup2(out_pipe[1], STDOUT_FILENO);
-        dup2(out_pipe[1], STDERR_FILENO);
-
-        // Close unused pipe ends in the child
-        close(in_pipe[1]);
-        close(out_pipe[0]);
-        close(client_fd);
-
-        DEBUG_PRINT("Executing egg_shell for client fd: %d\n", client_fd);
+        // Execute the custom shell (egg_shell) inside the PTY
         execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
         perror("execl failed");
         exit(1);
     } else if (pid > 0) {
-        // Parent process: communicate with client and shell via pipes
-        close(in_pipe[0]);
-        close(out_pipe[1]);
+        // Parent process: Communicate with the client and egg_shell via the PTY
+        DEBUG_PRINT("Parent process communicating with child (pid %d) via PTY for client fd: %d\n", pid, client_fd);
 
         char buffer[BUFFER_SIZE];
         ssize_t bytes_read;
-        fd_set read_fds;
-        struct timeval timeout;
 
+        fd_set read_fds;
         while (1) {
-            // Wait for command input from the client
             FD_ZERO(&read_fds);
             FD_SET(client_fd, &read_fds);
+            FD_SET(pty_fd, &read_fds);
 
-            int max_fd = (client_fd > out_pipe[0]) ? client_fd : out_pipe[0];
+            int max_fd = (client_fd > pty_fd) ? client_fd : pty_fd;
             int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
 
             if (activity < 0 && errno != EINTR) {
@@ -234,62 +208,34 @@ void handle_client(int client_fd) {
                 buffer[bytes_read] = '\0';
                 DEBUG_PRINT("Received command from client fd %d: %s\n", client_fd, buffer);
 
-                // Send command to egg_shell
-                strncat(buffer, "\n", sizeof(buffer) - strlen(buffer) - 1);
-                write(in_pipe[1], buffer, strlen(buffer));
+                // Send command to egg_shell via the PTY
+                write(pty_fd, buffer, bytes_read);
                 DEBUG_PRINT("Command sent to shell for client fd %d: %s\n", client_fd, buffer);
+            }
 
-                // Start reading the output in chunks with a longer timeout
-                int output_complete = 0;
-                while (!output_complete) {
-                    // Set a longer timeout for this loop
-                    timeout.tv_sec = TIMEOUT_SEC;
-                    timeout.tv_usec = TIMEOUT_USEC;
-
-                    FD_ZERO(&read_fds);
-                    FD_SET(out_pipe[0], &read_fds);
-
-                    int ready = select(out_pipe[0] + 1, &read_fds, NULL, NULL, &timeout);
-
-                    if (ready < 0) {
-                        perror("select");
-                        break;
-                    } else if (ready == 0) {
-                        // Timeout reached with no more data, assume output is complete
-                        // DEBUG_PRINT("Extended timeout reached, assuming command output is complete\n");
-                        output_complete = 1;
-                        break;
-                    }
-
-                    // Read output from egg_shell
-                    bytes_read = read(out_pipe[0], buffer, sizeof(buffer) - 1);
-                    if (bytes_read <= 0) {
-                        DEBUG_PRINT("Shell process closed output for client fd: %d\n", client_fd);
-                        output_complete = 1;
-                        break;  // Shell process finished
-                    }
-                    buffer[bytes_read] = '\0';
-                    DEBUG_PRINT("Received chunk from shell for client fd %d: %s\n", client_fd, buffer);
-
-                    // Send output chunk directly to the client
-                    write(client_fd, buffer, bytes_read);
-                    DEBUG_PRINT("Output chunk sent to client fd %d\n", client_fd);
+            // Check if there’s output from the shell (PTY output)
+            if (FD_ISSET(pty_fd, &read_fds)) {
+                bytes_read = read(pty_fd, buffer, sizeof(buffer) - 1);
+                if (bytes_read <= 0) {
+                    DEBUG_PRINT("Shell process closed output for client fd: %d\n", client_fd);
+                    break;  // Shell process finished
                 }
+                buffer[bytes_read] = '\0';
+                DEBUG_PRINT("Received output from shell for client fd %d: %s\n", client_fd, buffer);
+
+                // Send shell output to the client
+                write(client_fd, buffer, bytes_read);
+                DEBUG_PRINT("Output sent to client fd %d: %s\n", client_fd, buffer);
             }
         }
 
-        // Clean up: Close pipes and client connection
-        close(in_pipe[1]);
-        close(out_pipe[0]);
+        // Clean up: Close PTY and client connection
         close(client_fd);
-        waitpid(pid, NULL, 0);  // Wait for the child process to finish
+        close(pty_fd);
+        waitpid(pid, NULL, 0);
         DEBUG_PRINT("Closed connection and cleaned up for client fd: %d\n", client_fd);
     } else {
-        perror("fork");
-        close(in_pipe[0]);
-        close(in_pipe[1]);
-        close(out_pipe[0]);
-        close(out_pipe[1]);
+        perror("forkpty failed");
         close(client_fd);
     }
 }
