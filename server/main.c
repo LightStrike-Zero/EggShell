@@ -21,7 +21,8 @@
 #define PORT 40210
 #define COMMAND_COMPLETION_MARKER "__COMMAND_COMPLETED__"
 
-float version = 0.26;
+float version = 0.27;
+
 struct ClientInfo
 {
     int client_socket;
