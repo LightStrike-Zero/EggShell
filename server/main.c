@@ -229,6 +229,9 @@ void handle_client(int client_fd)
     pid_t pid = fork();
     if (pid == 0)
     { // Child process (shell)
+        // Set the PATH environment variable
+        setenv("PATH", "/usr/bin:/bin", 1);
+
         // Redirect shell's stdin, stdout, and stderr to the pipes
         if (dup2(server_to_shell[0], STDIN_FILENO) == -1 ||
             dup2(shell_to_server[1], STDOUT_FILENO) == -1 ||
@@ -243,7 +246,7 @@ void handle_client(int client_fd)
         close(client_fd);          // Child doesn't need client's socket
 
         // Execute the shell with line-buffered stdout
-        execlp("stdbuf", "stdbuf", "-oL", "/bin/bash", "bash", "--noprofile", "--norc", NULL);
+        execlp("stdbuf", "stdbuf", "-oL", "bash", "--noprofile", "--norc", NULL);
         perror("Failed to execute shell with stdbuf");
         exit(1);
     }
