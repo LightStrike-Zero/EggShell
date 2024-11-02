@@ -1,5 +1,5 @@
 /**
- * @file simple_shell.c
+ * @file main.c
  * @brief A basic UNIX shell implementation for ICT374
  *
  * This program implements a basic UNIX shell
@@ -10,33 +10,32 @@
  */
 
 /* Our includes */
-#include "definitions.h"
+                // #include "definitions.h"
 #include "terminal.h"
 #include "signals.h"
 #include "command.h"
-#include "token.h"
+                // #include "token.h"
 #include "history.h"
 #include "formatting.h"
 
 /* System includes */
-#include <stdlib.h> // for malloc, NULL, exit
-#include <stdio.h>  // for printf, snprintf
+                // #include <stdlib.h> // for malloc, NULL, exit
+                // #include <stdio.h>  // for printf, snprintf
 #include <string.h> // for strlen, strcpy, strcmp
-#include <dirent.h> // for DIR, opendir, readdir, closedir
-#include <unistd.h>
-#include <sys/types.h>
-#include <limits.h>
-#include <sys/wait.h>
-#include <ctype.h>
-#include <errno.h>
+                // #include <dirent.h> // for DIR, opendir, readdir, closedir
+                // #include <unistd.h>
+                // #include <sys/types.h>
+                // #include <limits.h>
+                // #include <sys/wait.h>
+                // #include <ctype.h>
+                // #include <errno.h>
 
-char PS1[MAX_COMMAND_LENGTH] = "%"; // Default shell prompt
+// defined in definitions.c and allocated here.
+char PS1[MAX_COMMAND_LENGTH] = "%";
 
 int main()
 {
-    char command[MAX_COMMAND_LENGTH];
     int rows, cols; // for terminal size. 
-
 
     // set up signal handlers
     setup_signal_handlers();
@@ -48,6 +47,7 @@ int main()
     welcome_message(cols);
     while (1)
     {
+        char command[MAX_COMMAND_LENGTH];
         // Read user input
         read_command(command);
 

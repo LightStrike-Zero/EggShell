@@ -6,15 +6,20 @@
  * 
  */
 
+/* Project Includes */
 #include "terminal.h"
+
+/* System Includes */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h> // contains struct for winsize. to store the size of the users terminal. 
 
+/* Global Variables */
 struct termios original_terminal_input;
 
+/* Function Definitions */
 void make_raw_terminal() {
     if (!isatty(STDIN_FILENO)) {
         // If not running in a terminal (e.g., over a network socket), skip raw mode
@@ -44,7 +49,7 @@ void restore_terminal() {
 }
 
 
-// do you want this @Lulu???
+// TODO do you want this @Lulu???
 void get_terminal_size(int *rows, int *cols)
 {
     struct winsize w;

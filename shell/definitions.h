@@ -1,3 +1,5 @@
+//TODO add comments and header
+
 #ifndef DEFINITIONS_H
 #define DEFINITIONS_H
 
@@ -5,6 +7,8 @@
 
 #define MAX_ARGS 1000
 #define MAX_TOKENS 1000
+#define MAX_TOKEN_LENGTH 1024
+#define HISTORY_SIZE 100
 #define MAX_COMMAND_LENGTH 1024
 
 /* Defines for keys */

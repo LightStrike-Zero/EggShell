@@ -1,16 +1,13 @@
+//TODO add a proper header comment
 // command.h
+
 #ifndef COMMAND_H
 #define COMMAND_H
 
+/* Project Includes */
 #include "definitions.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <glob.h>
-
-
-
+/* Global Variables */
 typedef struct Command {
     char *original_command;           // The original command string entered by the user
     char *command_name;               // The name of the command (e.g., "ls")
@@ -24,12 +21,14 @@ typedef struct Command {
     struct Command *next;             // Pointer to next command in a pipeline
 } Command;
 
+/* Function Declarations */
+//TODO add comments to the function declarations
 // Function declarations
 void read_command(char *command);
 void init_command(Command *cmd);
-int parse_command_string(char *input, Command *cmd);
-void free_command(Command *cmd);
+int parse_command_string(const char *input, Command *cmd);
+void free_command(const Command *cmd);
 void execute_command(Command *cmd);
-void parse_commands(char *input_command);
+void parse_commands(const char *input_command);
 
 #endif

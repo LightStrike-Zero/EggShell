@@ -1,7 +1,12 @@
+
+//TODO add comments and header
+
+/* Project Includes */
 #include "history.h"
+
+/* System Includes */
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
 #include <unistd.h>
 
 char history[HISTORY_SIZE][MAX_COMMAND_LENGTH];
@@ -20,7 +25,7 @@ void add_to_history(const char *command) {
     history_index = history_count; // Reset history index to the end
 }
 
-void handle_history_navigation(char *command, int *index, const char *PS1) {
+void handle_history_navigation(char *command, size_t *index, const char *PS1) {
     char seq[3];
     if (read(STDIN_FILENO, &seq[0], 1) == 0) return;
     if (read(STDIN_FILENO, &seq[1], 1) == 0) return;
@@ -53,10 +58,10 @@ void handle_history_navigation(char *command, int *index, const char *PS1) {
     }
 }
 
-void repeat_command_by_number(int command_number, char *command) {
+void repeat_command_by_number(const int command_number, char *command) {
     if (command_number > 0 && command_number <= history_count) {
-        int index = (command_number - 1) % HISTORY_SIZE;
-        char *retrieved_command = history[index];
+        const int index = (command_number - 1) % HISTORY_SIZE;
+        const char *retrieved_command = history[index];
         if (retrieved_command[0] == '!') {
             printf("Cannot repeat a command that starts with '!'\n");
             command[0] = '\0';
@@ -70,7 +75,7 @@ void repeat_command_by_number(int command_number, char *command) {
     }
 }
 
-void repeat_command_by_string(char *prefix, char *command) {
+void repeat_command_by_string(const char *prefix, char *command) {
     for (int i = history_count - 1; i >= 0; i--) {
         if (strncmp(history[i % HISTORY_SIZE], prefix, strlen(prefix)) == 0) {
             strcpy(command, history[i % HISTORY_SIZE]);

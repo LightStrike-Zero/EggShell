@@ -6,14 +6,19 @@
  * 
  */
 
+/* Project Includes */
+#include "definitions.h"
 #include "signals.h"
-#include "simple_shell.h"
 #include "terminal.h"
+
+/* System Includes */
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/wait.h>
+
+
 
 void setup_signal_handlers() {
     struct sigaction sa_int, sa_chld, sa_quit, sa_tstp;

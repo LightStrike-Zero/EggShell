@@ -1,31 +1,36 @@
+
+/* Project Includes */
 #include "token.h"
+
+/* System Includes */
 #include <glob.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 
-void trim_whitespace(char *str)
-{
-    char *end;
-    while (isspace((unsigned char)*str))
-        str++;
+/* Function Definitions */
 
-    if (*str == 0)
+void trim_whitespace(char *string)
+{
+    while (isspace((unsigned char)*string))
+        string++;
+
+    if (*string == 0)
     {
-        *str = '\0';
+        *string = '\0';
         return;
     }
-    end = str + strlen(str) - 1;
-    while (end > str && isspace((unsigned char)*end))
+    char* end = string + strlen(string) - 1;
+    while (end > string && isspace((unsigned char)*end))
         end--;
     *(end + 1) = '\0';
 }
 
-int expand_wildcard(char *pattern, char *expanded_args[], int max_args)
+int expand_wildcard(const char *pattern, char *expanded_args[], const int max_args)
 {
     glob_t glob_result;
-    int i, count = 0;
+    int count = 0;
 
     memset(&glob_result, 0, sizeof(glob_result));
 
@@ -33,12 +38,12 @@ int expand_wildcard(char *pattern, char *expanded_args[], int max_args)
     if (glob(pattern, GLOB_TILDE, NULL, &glob_result) == 0)
     {
         // Copy the expanded file paths into expanded_args
-        for (i = 0; i < glob_result.gl_pathc && count < max_args; i++)
+        for (int i = 0; i < glob_result.gl_pathc && count < max_args; i++)
         {
             expanded_args[count] = strdup(glob_result.gl_pathv[i]);
             if (expanded_args[count] == NULL)
             {
-                fprintf(stderr, "Memory allocation failed\n");
+                fprintf(stderr, "Memory allocation failed for wildcard expansion\n");
                 exit(1);
             }
             count++;
@@ -56,19 +61,19 @@ int expand_wildcard(char *pattern, char *expanded_args[], int max_args)
     return count;
 }
 
-int tokenise(char *line, char *tokens[])
+int tokenise(const char *line, char *tokens[])
 {
     int i = 0;
-    char *ptr = line;
+    const char *currentCharPos  = line;
 
-    while (*ptr != '\0')
+    while (*currentCharPos  != '\0')
     {
         // Skip leading whitespace
-        while (isspace((unsigned char)*ptr))
+        while (isspace((unsigned char)*currentCharPos ))
         {
-            ptr++;
+            currentCharPos ++;
         }
-        if (*ptr == '\0')
+        if (*currentCharPos  == '\0')
             break;
 
         char *token = malloc(MAX_TOKEN_LENGTH);
@@ -81,29 +86,29 @@ int tokenise(char *line, char *tokens[])
         int in_single_quote = 0;
         int in_double_quote = 0;
 
-        while (*ptr != '\0' && (in_single_quote || in_double_quote || !isspace((unsigned char)*ptr)))
+        while (*currentCharPos  != '\0' && (in_single_quote || in_double_quote || !isspace((unsigned char)*currentCharPos )))
         {
-            if (*ptr == '\\')
+            if (*currentCharPos  == '\\')
             {
-                ptr++;
-                if (*ptr != '\0')
+                currentCharPos ++;
+                if (*currentCharPos  != '\0')
                 {
-                    token[j++] = *ptr++;
+                    token[j++] = *currentCharPos ++;
                 }
             }
-            else if (*ptr == '\'' && !in_double_quote)
+            else if (*currentCharPos  == '\'' && !in_double_quote)
             {
                 in_single_quote = !in_single_quote;
-                ptr++; // Skip the quote
+                currentCharPos ++; // Skip the quote
             }
-            else if (*ptr == '\"' && !in_single_quote)
+            else if (*currentCharPos  == '\"' && !in_single_quote)
             {
                 in_double_quote = !in_double_quote;
-                ptr++; // Skip the quote
+                currentCharPos ++; // Skip the quote
             }
             else
             {
-                token[j++] = *ptr++;
+                token[j++] = *currentCharPos ++;
             }
 
             if (j >= MAX_TOKEN_LENGTH - 1)
@@ -126,11 +131,10 @@ int tokenise(char *line, char *tokens[])
             if (strpbrk(token, "*?") != NULL)
             {
                 // Perform wildcard expansion
-                glob_t glob_result;
-                memset(&glob_result, 0, sizeof(glob_result));
+                glob_t glob_result = {0};
 
-                int glob_ret = glob(token, GLOB_TILDE, NULL, &glob_result);
-                if (glob_ret == 0)
+                const int glob_result_code = glob(token, GLOB_TILDE, NULL, &glob_result);
+                if (glob_result_code == 0)
                 {
                     // Copy expanded tokens into tokens array
                     for (size_t k = 0; k < glob_result.gl_pathc; k++)

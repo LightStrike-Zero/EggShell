@@ -2,31 +2,32 @@
  * @file builtins.c
  * @brief Implementation of built-in shell commands
  *
+ *TODO is this all relevant?
  * This file contains functions for built-in commands like cd, pwd, exit, etc.
  * 
  * @author 
  * @date 
  */
 
+/* Project Includes */
 #include "builtins.h"
 #include "definitions.h"
 #include "terminal.h"
 
-// System includes
+/* System Includes */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <limits.h>
-#include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <netdb.h>
-#include <linux/limits.h> // check this, vs code was getting upset about not have the linux/limits
+#include <linux/limits.h>
 
-void change_directory(char *path) {
+/* End Includes */
+
+void change_directory(const char *path) {
     if (chdir(path) < 0) {
         perror("chdir failed");
     } else {
@@ -40,7 +41,7 @@ void change_directory(char *path) {
     }
 }
 
-void cd(char *path)
+void cd(const char *path)
 {
     if (path == NULL || strcmp(path, "") == 0) 
     {
@@ -78,7 +79,7 @@ void cd(char *path)
 
 void pwd()
 {
-    char cwd[PATH_MAX];  // PATH_MAX is defined in <limits.h>
+    char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) != NULL) {
         printf("%s\n", cwd);
     } else {
@@ -92,7 +93,7 @@ void change_hostname()
     printf("Enter new hostname: ");
     if (fgets(new_hostname, sizeof(new_hostname), stdin) != NULL)
     { // Remove the newline character, if present
-        int len = strlen(new_hostname);
+        const size_t len = strlen(new_hostname);
         if (len > 0 && new_hostname[len - 1] == '\n') {
             new_hostname[len - 1] = '\0';
         }
@@ -130,14 +131,12 @@ void error(const char *msg) {
     exit(0);
 }
 
-void connect_to_server(char *hostname, int port) {
-    int sockfd;
+void connect_to_server(char *hostname, const int port) {
     struct sockaddr_in server_addr;
     char buffer[1024];
-    int bytes_received;
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
+    const int socket_file_descriptor = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_file_descriptor < 0) {
         perror("Socket creation failed");
         return;
     }
@@ -148,13 +147,13 @@ void connect_to_server(char *hostname, int port) {
 
     if (inet_pton(AF_INET, hostname, &server_addr.sin_addr) <= 0) {
         perror("Invalid address/Address not supported");
-        close(sockfd);
+        close(socket_file_descriptor);
         return;
     }
 
-    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (connect(socket_file_descriptor, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Connection failed");
-        close(sockfd);
+        close(socket_file_descriptor);
         return;
     }
 
@@ -175,12 +174,12 @@ void connect_to_server(char *hostname, int port) {
     password[strcspn(password, "\n")] = '\0';
 
     snprintf(buffer, sizeof(buffer), "%s %s", username, password);
-    send(sockfd, buffer, strlen(buffer), 0);
+    send(socket_file_descriptor, buffer, strlen(buffer), 0);
 
-    bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    ssize_t bytes_received = recv(socket_file_descriptor, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received < 0) {
-        perror("recv");
-        close(sockfd);
+        perror("Error receiving data from server");
+        close(socket_file_descriptor);
         return;
     }
 
@@ -191,7 +190,7 @@ void connect_to_server(char *hostname, int port) {
         printf("Logged in successfully.\n");
     } else {
         printf("Authentication failed.\n");
-        close(sockfd);
+        close(socket_file_descriptor);
         return;
     }
 
@@ -212,12 +211,12 @@ void connect_to_server(char *hostname, int port) {
             break;
         }
 
-        if (send(sockfd, command, strlen(command), 0) < 0) {
+        if (send(socket_file_descriptor, command, strlen(command), 0) < 0) {
             perror("Error sending command to server");
             break;
         }
 
-        while ((bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0)) > 0) {
+        while ((bytes_received = recv(socket_file_descriptor, buffer, sizeof(buffer) - 1, 0)) > 0) {
             buffer[bytes_received] = '\0';
             printf("%s", buffer);
             if (strstr(buffer, "%")) {
@@ -225,10 +224,10 @@ void connect_to_server(char *hostname, int port) {
             }
         }
 
-        send(sockfd, "READY", 5, 0);
+        send(socket_file_descriptor, "READY", 5, 0);
     }
 
-    close(sockfd);
+    close(socket_file_descriptor);
 }
 
 void exit_shell() {

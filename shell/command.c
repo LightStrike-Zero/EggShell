@@ -1,36 +1,46 @@
 /**
- * @file command_parser.c
+ * @file command.c
  * @brief Command parsing functions
  *
  * This file contains functions to parse command strings into Command structures.
  * 
  */
 
+/* Project Includes */
 #include "command.h"
 #include "definitions.h"
 #include "history.h"
+
+/* System Includes */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <ctype.h>
+#include <glob.h>
+#include <terminal.h>
+#include <token.h>
+
+/* End Includes */
+
 
 void read_command(char *command) {
     // Set terminal to raw mode only if in an interactive terminal
     make_raw_terminal();
     
-    int index = 0;
+    size_t index = 0;
     printf("%s", PS1);
     fflush(stdout);
     
     while (1) {
         char character;
-        ssize_t nread = read(STDIN_FILENO, &character, 1);
-        if (nread == -1 && errno != EAGAIN) {
+        const int line = read(STDIN_FILENO, &character, 1);
+        if (line == -1 && errno != EAGAIN) {
             perror("read");
             break;
-        } else if (nread == 0) {
+        }
+        if (line == 0) {
             // EOF (e.g., Ctrl+D)
             printf("\n");
             restore_terminal();
@@ -41,7 +51,8 @@ void read_command(char *command) {
             command[index] = '\0';
             printf("\n");
             break;
-        } else if (character == BACKSPACE || character == 8) {
+        }
+        if (character == BACKSPACE || character == 8) {
             if (index > 0) {
                 index--;
                 command[index] = '\0';
@@ -72,8 +83,8 @@ void read_command(char *command) {
                 command[0] = '\0';
             }
         } else if (isdigit(command[1])) {
-            int cmd_num = atoi(&command[1]);
-            repeat_command_by_number(cmd_num, command);
+            const int command_num = atoi(&command[1]);
+            repeat_command_by_number(command_num, command);
         } else {
             repeat_command_by_string(&command[1], command);
         }
@@ -99,7 +110,7 @@ void init_command(Command *cmd) {
 }
 
 // Free memory allocated in Command struct
-void free_command(Command *cmd) {
+void free_command(const Command *cmd) {
     if (cmd == NULL) return;
     free(cmd->original_command);
     // Free each argument
@@ -114,15 +125,14 @@ void free_command(Command *cmd) {
 }
 
 // Helper function to handle wildcard expansion
-void expand_wildcards(char *token, Command *cmd) {
-    glob_t glob_result;
-    memset(&glob_result, 0, sizeof(glob_result));
-    int ret = glob(token, GLOB_TILDE, NULL, &glob_result);
-    if (ret == 0) {
-        for (size_t i = 0; i < glob_result.gl_pathc; ++i) {
-            cmd->args[cmd->arg_count++] = strdup(glob_result.gl_pathv[i]);
+void expand_wildcards(const char *token, Command *cmd) {
+    glob_t glob_output = {0};
+    const int glob_result_code = glob(token, GLOB_TILDE, NULL, &glob_output);
+    if (glob_result_code == 0) {
+        for (size_t i = 0; i < glob_output.gl_pathc; ++i) {
+            cmd->args[cmd->arg_count++] = strdup(glob_output.gl_pathv[i]);
         }
-        globfree(&glob_result);
+        globfree(&glob_output);
     } else {
         // No matches found, keep the token as is
         cmd->args[cmd->arg_count++] = strdup(token);
@@ -130,19 +140,19 @@ void expand_wildcards(char *token, Command *cmd) {
 }
 
 // Parse individual command string into Command struct
-int parse_command_string(char *input, Command *cmd) {
+int parse_command_string(const char *input, Command *cmd) {
 
     init_command(cmd);
     cmd->original_command = strdup(input);
 
     char *tokens[MAX_TOKENS];
-    int num_tokens = tokenise(input, tokens);
+    const int num_tokens = tokenise(input, tokens);
     int i = 0;
 
     int in_redirection = 0, out_redirection = 0, err_redirection = 0;
 
     while (i < num_tokens) {
-        char *token = tokens[i];
+        const char *token = tokens[i];
 
         if (strcmp(token, "<") == 0) {
             in_redirection = 1;
@@ -210,7 +220,7 @@ int parse_command_string(char *input, Command *cmd) {
     return 0;
 }
 
-void parse_commands(char *input_command) {
+void parse_commands(const char *input_command) {
     char *commands_str[MAX_ARGS];
     char *separators[MAX_ARGS];
     int num_commands = 0;

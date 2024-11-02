@@ -6,11 +6,13 @@
  * 
  */
 
+#include "definitions.h"
 #include "execution.h"
 #include "builtins.h"
-#include "simple_shell.h"
-#include "signals.h"
+                // #include "signals.h"
 #include "terminal.h"
+#include "history.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -24,8 +26,6 @@ void execute_command(Command *cmd) {
 
     // Handle built-in commands
     if (strcmp(cmd->command_name, "exit") == 0) {
-        restore_terminal();
-        printf("Exiting shell...\n");
         exit_shell();
     } else if (strcmp(cmd->command_name, "history") == 0) {
         show_history();
@@ -62,13 +62,13 @@ void execute_command(Command *cmd) {
 
         if (cmd->arg_count == 3) {
             char *hostname = cmd->args[1];
-            int port = atoi(cmd->args[2]);
+            const int port = atoi(cmd->args[2]);
             connect_to_server(hostname, port);
         } 
         if(cmd->arg_count == 2)
         {
             char *hostname = cmd->args[1];
-            int port = 40210;
+            const int port = 40210;
             connect_to_server(hostname, port);
         }
         
@@ -79,7 +79,7 @@ void execute_command(Command *cmd) {
     }
 
     int num_pipes = 0;
-    Command *current_cmd = cmd;
+    const Command *current_cmd = cmd;
     while (current_cmd->next != NULL) {
         num_pipes++;
         current_cmd = current_cmd->next;
@@ -142,7 +142,8 @@ void execute_command(Command *cmd) {
             execvp(current_cmd->command_name, current_cmd->args);
             perror("execvp");
             exit(EXIT_FAILURE);
-        } else if (pid < 0) {
+        }
+        if (pid < 0) {
             perror("fork");
             return;
         }
