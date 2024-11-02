@@ -6,11 +6,11 @@ TARGET = server
 
 all: $(TARGET)
 
-$(TARGET): main.o
-	$(CC) $(CFLAGS) -o $(TARGET) main.o 
+$(TARGET): server.o
+	$(CC) $(CFLAGS) -o $(TARGET) server.o
 
-main.o: main.c 
-	$(CC) $(CFLAGS) -c main.c
+server.o: server.c server.h
+	$(CC) $(CFLAGS) -c server.c
 
 clean:
 	rm -f $(TARGET) *.o

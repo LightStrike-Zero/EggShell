@@ -41,9 +41,9 @@ void connect_to_server(char *hostname, const int port);
 /**
  * Relays data between stdin and the connected socket.
  *
- * @param sockfd The connected socket file descriptor.
+ * @param socket The connected socket file descriptor.
  */
-void relay_data(int sockfd);
+void relay_data(int socket);
 
 /**
  * Creates a TCP socket and connects to the specified hostname and port.

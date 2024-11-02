@@ -24,10 +24,12 @@
 #include <linux/limits.h>
 #include <sys/select.h>
 #include <fcntl.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <netdb.h>
 /* End Includes */
+
+#define MAX_PASSWORD_LENGTH  32
+#define MAX_USERNAME_LENGTH  32
+#define BUFFER_SIZE  4096
 
 void change_directory(const char *path) {
     if (chdir(path) < 0) {
@@ -157,73 +159,101 @@ void error(const char *msg) {
 }
 
 void connect_to_server(char *hostname, const int port) {
-    int sockfd;
-
     // Create and connect the socket
-    sockfd = create_and_connect_socket(hostname, port);
-    if (sockfd == -1) {
+    const int socket = create_and_connect_socket(hostname, port);
+    if (socket == -1) {
         fprintf(stderr, "Failed to establish connection to %s:%d\n", hostname, port);
+        return;
+    }
+
+    // Prompt for username and password
+    char username[MAX_USERNAME_LENGTH];
+    char password[MAX_PASSWORD_LENGTH];
+    printf("Username: ");
+    fgets(username, sizeof(username), stdin);
+    username[strcspn(username, "\n")] = '\0';
+
+    printf("Password: ");
+    fgets(password, sizeof(password), stdin);
+    password[strcspn(password, "\n")] = '\0';
+
+    // transmit username and password
+    dprintf(socket, "%s\n", username);
+    dprintf(socket, "%s\n", password);
+
+    // check response
+    char response[BUFFER_SIZE];
+    const int bytes_received = read(socket, response, sizeof(response) - 1);
+    if (bytes_received <= 0) {
+        perror("read");
+        close(socket);
+        return;
+    }
+    response[bytes_received] = '\0';
+    printf("%s", response);
+
+    if (strstr(response, "Authentication successful") == NULL) {
+        close(socket);
         return;
     }
 
     printf("Connected to %s:%d\n", hostname, port);
     printf("Type your commands below. Press Ctrl+D to disconnect.\n");
 
-    // Relay data between stdin and socket
-    relay_data(sockfd);
+    // transmit data
+    relay_data(socket);
 
     printf("Connection closed.\n");
 }
 
-void relay_data(int sockfd) {
+void relay_data(const int socket) {
     fd_set read_fds;
-    int max_fd = (sockfd > STDIN_FILENO) ? sockfd : STDIN_FILENO;
-    char buffer[4096];
+    const int max_fd = (socket > STDIN_FILENO) ? socket : STDIN_FILENO;
     int n;
 
     while (1) {
+        char buffer[BUFFER_SIZE];
         FD_ZERO(&read_fds);
         FD_SET(STDIN_FILENO, &read_fds);
-        FD_SET(sockfd, &read_fds);
+        FD_SET(socket, &read_fds);
 
-        // Wait for data on either stdin or socket
+        // wait for data on either stdin or socket
         if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
             perror("select");
             break;
         }
 
-        // Check if data is available on stdin
+        // poll data on stdin
         if (FD_ISSET(STDIN_FILENO, &read_fds)) {
             n = read(STDIN_FILENO, buffer, sizeof(buffer));
             if (n < 0) {
                 perror("read from stdin");
                 break;
-            } else if (n == 0) {
-                // EOF (Ctrl+D)
+            }
+            if (n == 0) {
                 printf("\nDisconnected from server.\n");
                 break;
             }
 
-            // Send data to server
-            if (write(sockfd, buffer, n) != n) {
+            // end data to server
+            if (write(socket, buffer, n) != n) {
                 perror("write to socket");
                 break;
             }
         }
 
-        // Check if data is available on the socket
-        if (FD_ISSET(sockfd, &read_fds)) {
-            n = read(sockfd, buffer, sizeof(buffer));
+        // poll data on socket
+        if (FD_ISSET(socket, &read_fds)) {
+            n = read(socket, buffer, sizeof(buffer));
             if (n < 0) {
                 perror("read from socket");
                 break;
             } else if (n == 0) {
-                // Server closed connection
                 printf("\nServer closed the connection.\n");
                 break;
             }
 
-            // Write data to stdout
+            // data to stdout
             if (write(STDOUT_FILENO, buffer, n) != n) {
                 perror("write to stdout");
                 break;
@@ -232,18 +262,18 @@ void relay_data(int sockfd) {
     }
 
     // Cleanup
-    close(sockfd);
+    close(socket);
 }
 
 int create_and_connect_socket(const char *hostname, const int port) {
     int sockfd;
     struct addrinfo hints, *servinfo, *p;
     int rv;
-    char port_str[6]; // Max port number is 65535
+    char port_str[6];  // port can be up to 5 characters long
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;      // IPv4 or IPv6
-    hints.ai_socktype = SOCK_STREAM;  // TCP
+    hints.ai_socktype = SOCK_STREAM;
 
     snprintf(port_str, sizeof(port_str), "%d", port);
 
