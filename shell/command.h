@@ -71,16 +71,76 @@ void execute_command(Command *cmd);
  * @param input_command The input command string containing multiple commands
  */
 void parse_commands(const char *input_command);
+
+/**
+ * @brief Executes a command by handling built-in commands, setting up pipes, and forking processes.
+ * @param cmd Pointer to the Command structure representing the command to execute.
+ */
 void execute_command(Command *cmd);
+
+/**
+ * @brief Checks if a command is a built-in command and executes it if true.
+ * @param cmd Command structure.
+ * @return 1 if the command was a built-in, 0 otherwise.
+ */
 int handle_builtin_commands(Command *cmd);
+
+/**
+ * @brief Handles connection to the specified server.
+ * @param cmd Command structure containing the hostname and optional port
+ */
 void handle_connect_command(Command *cmd);
 
+/**
+ * @brief Waits for all child processes
+ * @param is_background Flag indicating if the command should run in the background
+ * @param num_pipes The number of pipes
+ */
 void wait_for_children(int is_background, int num_pipes);
+
+/**
+ * @brief Sets redirections for a command if specified
+ * @param cmd Command structure containing redirection information
+ */
 void handle_redirections(const Command *cmd);
+
+/**
+ * @brief the number of pipes in a command chain.
+ * @param cmd starting Command structure
+ * @return number of pipes found in the command chain
+ */
 int count_pipes(const Command *cmd);
+
+/**
+ * @brief sets up pipes for inter-process communication
+ * @param pipefds array to store pipe file descriptors
+ * @param num_pipes number of pipes to set up
+ * @return 1 on successful setup 0 on failure
+ */
 int setup_pipes(int *pipefds, int num_pipes);
+
+/**
+ * @brief Executes a chain of commands connected by pipes
+ * @param cmd starting Command structure
+ * @param pipefds array of pipe file descriptors for inter-process communication
+ * @param num_pipes The total number of pipes in the command chain
+ */
 void execute_with_pipes(Command *cmd, int *pipefds, int num_pipes);
+
+/**
+ * @brief Manages pipes by setting up file descriptors for input and output redirection
+ * @param pipefds array of pipe file descriptors
+ * @param cmd_index index of the current command in the pipeline
+ * @param num_pipes  number of pipes
+ * @param has_next indicates if there's a command in the chain
+ */
 void manage_pipes(int *pipefds, int cmd_index, int num_pipes, int has_next);
+
+/**
+ * @brief closes all open pipes in the file descriptor array
+ * @param pipefds srray of pipe file descriptors
+ * @param num_pipes number of pipes
+ */
 void close_pipes(int *pipefds, int num_pipes);
 
 #endif

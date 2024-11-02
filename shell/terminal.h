@@ -1,4 +1,11 @@
-//TODO add file header comments here
+/**
+ * @file terminal.h
+ * @brief Header file for managing the state of the terminal
+ * 
+ * @author Shaun Matthews & Louise Barjaktarevic
+ * @date 19/10/24
+ */
+
 
 #ifndef TERMINAL_H
 #define TERMINAL_H
@@ -10,9 +17,15 @@
 extern struct termios original_terminal_input;
 
 /* Function Declarations */
-//TODO add comments to the function declarations
+/**
+ * @brief set the terminal to raw mode disabling "canoical" input
+ *        This mode allows for character-by-character input handling
+ */
 void make_raw_terminal();
-void restore_terminal();
-void get_terminal_size(int *rows, int *cols);
 
-#endif // TERMINAL_H
+/**
+ * @brief restores the terminal to its original settings and exiting raw mode
+ */
+void restore_terminal();
+
+#endif // TERMINAL_Hs
