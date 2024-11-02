@@ -36,8 +36,8 @@ void execute_command(Command *cmd) {
     } else if (strcmp(cmd->command_name, "man") == 0) {
         man();
         return;
-    } else if (strcmp(cmd->command_name, "hostname") == 0) {
-        change_hostname();
+    } else if (strcmp(cmd->command_name, "prompt") == 0) {
+        set_prompt(cmd->args[1]);
         return;
     } else if (strcmp(cmd->command_name, "cd") == 0) {
         if (cmd->arg_count > 1) {
@@ -46,18 +46,6 @@ void execute_command(Command *cmd) {
             cd(NULL); // cd without argument
         }
         return;
-    } else if (strcmp(cmd->command_name, "prompt") == 0) {
-        if (cmd->arg_count > 1) {
-            snprintf(PS1, sizeof(PS1), "%s", cmd->args[1]);
-        } else {
-            fprintf(stderr, "Usage: prompt <new_prompt>\n");
-        }
-        return;
-
-
-        
-
-        
         } else if (strcmp(cmd->command_name, "connect") == 0) {
 
         if (cmd->arg_count == 3) {

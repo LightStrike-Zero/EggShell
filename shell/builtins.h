@@ -10,7 +10,7 @@ void cd(const char *path);
 void pwd();
 void connect_to_server(char *hostname, const int port);
 void man();
-void change_hostname();
+void set_prompt(const char *new_prompt);
 void exit_shell();
 
 #endif // BUILTINS_H

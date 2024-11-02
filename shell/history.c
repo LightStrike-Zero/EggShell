@@ -72,7 +72,7 @@ void handle_history_navigation(char *command, size_t *index, size_t *cursor_pos,
 
             // Clear current line and display the command
             printf("\r\33[2K"); // Clear entire line
-            printf("%s%s", PS1, command);
+            printf("%s"YELLOW"%s"RESET, PS1, command);
             fflush(stdout);
             *index = strlen(command);
         }
@@ -104,7 +104,7 @@ void handle_history_navigation(char *command, size_t *index, size_t *cursor_pos,
 
             // Clear current line and display the command
             printf("\r\33[2K"); // Clear entire line
-            printf("%s%s", PS1, command);
+            printf("%s"YELLOW"%s"RESET, PS1, command);
             fflush(stdout);
             *index = strlen(command);
         }
@@ -125,6 +125,7 @@ void handle_history_navigation(char *command, size_t *index, size_t *cursor_pos,
             }
         }
         else {
+            printf(RESET);
             return; // Ignore other sequences
         }
     }

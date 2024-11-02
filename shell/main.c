@@ -9,50 +9,30 @@
  * @date 25/09/2024
  */
 
+
 /* Our includes */
-                // #include "definitions.h"
-#include "terminal.h"
+#include "definitions.h"
 #include "signals.h"
 #include "command.h"
-                // #include "token.h"
-#include "history.h"
-#include "formatting.h"
 
 /* System includes */
-                // #include <stdlib.h> // for malloc, NULL, exit
-                // #include <stdio.h>  // for printf, snprintf
+#include <stdio.h>
 #include <string.h> // for strlen, strcpy, strcmp
-                // #include <dirent.h> // for DIR, opendir, readdir, closedir
-                // #include <unistd.h>
-                // #include <sys/types.h>
-                // #include <limits.h>
-                // #include <sys/wait.h>
-                // #include <ctype.h>
-                // #include <errno.h>
+
+
 
 // defined in definitions.c and allocated here.
 char PS1[MAX_COMMAND_LENGTH] = "%";
-//
-// extern char **environ;
 
-/**
- * @brief Main function for the shell
- *
- * @return int
- */
+void welcome_message();
+
 int main()
 {
-    int rows, cols; // for terminal size. 
-    // char **env = environ;
-
     // set up signal handlers
     setup_signal_handlers();
 
-    get_terminal_size(&rows, &cols);
-
     // display the welcome message
-    // size depends on terminal size, takes cols to check users window size, and decides which message to display
-    welcome_message(cols);
+    welcome_message();
     while (1)
     {
         char command[MAX_COMMAND_LENGTH];
@@ -66,7 +46,17 @@ int main()
         }
     }
 
-
-// free resources
     return 0;
+}
+
+void welcome_message()
+{
+
+
+    printf(BRIGHT_MAGENTA   " _______               "BLUE"        __           __ __  "RESET"\n");
+    printf(BRIGHT_MAGENTA   "|    ___|.-----.-----. "BLUE"-----.|  |--.-----.|  |  |  "RESET"\n");
+    printf(BRIGHT_MAGENTA   "|    ___||  _  |  _  | "BLUE"__ --||     |  -__||  |  |  "RESET"\n");
+    printf(PINK             "|_______||___  |___  | "BRIGHT_BLUE"_____||__|__|_____||__|__|  "RESET"\n");
+    printf(PINK             "         |_____|_____| "BRIGHT_BLUE"                            "RESET"\n");
+    printf(BRIGHT_MAGENTA    "Developed by "PINK"Louise Barjaktarevic "BRIGHT_BLUE"& "BLUE"Shaun Matthews\n"RESET);
 }

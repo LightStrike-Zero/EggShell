@@ -87,31 +87,38 @@ void pwd()
     }
 }
 
-void change_hostname() {
-    char new_hostname[MAX_HOSTNAME_LENGTH];  // buffer for the new hostname
-    printf("Enter new hostname: ");
-    if (fgets(new_hostname, sizeof(new_hostname), stdin) != NULL) {
-        // Remove the newline character, if present
-        size_t len = strlen(new_hostname);
-        if (len > 0 && new_hostname[len - 1] == '\n') {
-            new_hostname[len - 1] = '\0';
-        }
+void set_prompt(const char *new_prompt) {
+    // Buffer to hold the processed prompt
+    char processed_prompt[MAX_PROMPT_LENGTH];
 
-        // Make sure new_hostname does not exceed a safe length
-        if (strlen(new_hostname) > MAX_HOSTNAME_LENGTH - 1) {
-            printf("Hostname is too long. Maximum length is %d characters.\n", MAX_HOSTNAME_LENGTH - 1);
-            return;
-        }
+    if (new_prompt == NULL) {
+        fprintf(stderr, "Error: new_prompt is NULL.\n");
+        return;
+    }
 
-        // Write to PS1 with a safe format, limiting to MAX_PROMPT_LENGTH
-        int written = snprintf(PS1, MAX_PROMPT_LENGTH, "[%s] $", new_hostname);
-        if (written < 0 || written >= MAX_PROMPT_LENGTH) {
-            fprintf(stderr, "Warning: Hostname was truncated.\n");
-        } else {
-            printf("Hostname has been changed.\n");
-        }
-    } else {
-        perror("fgets");
+    // Copy the input to processed_prompt with safety
+    strncpy(processed_prompt, new_prompt, sizeof(processed_prompt) - 1);
+    processed_prompt[sizeof(processed_prompt) - 1] = '\0';  // Ensure null-termination
+
+    // Remove any newline characters from the input
+    size_t len = strlen(processed_prompt);
+    if (len > 0 && processed_prompt[len - 1] == '\n') {
+        processed_prompt[len - 1] = '\0';
+        len--;
+    }
+    // Check if the prompt length exceeds the maximum allowed length
+    if (len > MAX_PROMPT_LENGTH - 3) {
+        fprintf(stderr, "Error: Prompt is too long. Maximum length is %d characters.\n", MAX_PROMPT_LENGTH - 3);
+        return;
+    }
+
+    // Format the PS1 variable with the new prompt
+    const int written = snprintf(PS1, sizeof(PS1), "[%s] %%", processed_prompt);
+    if (written < 0) {
+        fprintf(stderr, "Error: Failed to set the prompt.\n");
+        return;
+    } else if ((size_t)written >= sizeof(PS1)) {
+        fprintf(stderr, "Warning: Prompt was truncated.\n");
     }
     fflush(stdout);
 }
@@ -120,17 +127,18 @@ void man()
 {
     // displays user manual.
     // list of available commands
+    //TODO shaun to fix this
     printf("This is Eggshell's user manual.\n"
            "Available commands:\n"
-           "Usage: <hostname> $ <command>\n"
-          PINK "pwd -     Prints the working directory.\n"
+           "Usage: <prompt> $ <command>\n"
+            "pwd -     Prints the working directory.\n"
            "history - Use up and down arrow keys to toggle through command history.\n"
-           "exit -    Exit shell. Bye Bye.\n"END_PINK); 
+           "exit -    Exit shell. Bye Bye.\n");
 }
 
 void error(const char *msg) {
     perror(msg);
-    exit(0);
+    exit(EXIT_FAILURE);
 }
 
 void connect_to_server(char *hostname, const int port) {

@@ -39,6 +39,7 @@ void read_command(char *command) {
         const int line = read(STDIN_FILENO, &character, 1);
         if (line == -1 && errno != EAGAIN) {
             perror("Error reading input");
+            restore_terminal();
             break;
         }
         if (line == 0) {
@@ -74,10 +75,8 @@ void read_command(char *command) {
             }
         } else if (character == ESCAPE) {
             handle_history_navigation(command, &index, &cursor_pos, PS1);
-        } else if (character == 27) { // Handle other escape sequences
-            // Optionally handle more escape sequences here
+        } else if (character == 27) {
         } else if (character == '\t') {
-            // Handle tab completion if desired
         } else if (isprint(character)) {
             if (index < MAX_COMMAND_LENGTH - 1) {
                 // Insert character at cursor position
