@@ -56,20 +56,20 @@ void read_command(char *command) {
         }
         if (character == BACKSPACE || character == 8) {
             if (cursor_pos > 0 && index > 0) {
-                // Shift characters left from cursor position
+                // shift characters left from cursor position
                 memmove(&command[cursor_pos - 1], &command[cursor_pos], index - cursor_pos);
                 index--;
                 cursor_pos--;
                 command[index] = '\0';
 
-                // Move cursor back, clear to end, and reprint the rest of the command
+                // move cursor back, clear to end, and reprint the rest of the command
                 printf("\b");
-                printf("\033[K"); // Clear from cursor to end of line
+                printf("\033[K"); // clear from cursor to end of line
                 printf("%s", &command[cursor_pos]);
 
-                // Move cursor back to the correct position
+                // move cursor back to the correct position
                 for (size_t i = cursor_pos; i < index; i++) {
-                    printf("\033[D"); // Move cursor left
+                    printf("\033[D"); // move cursor left
                 }
                 fflush(stdout);
             }
@@ -79,18 +79,18 @@ void read_command(char *command) {
         } else if (character == '\t') {
         } else if (isprint(character)) {
             if (index < MAX_COMMAND_LENGTH - 1) {
-                // Insert character at cursor position
+                // insert character at cursor position
                 memmove(&command[cursor_pos + 1], &command[cursor_pos], index - cursor_pos);
                 command[cursor_pos] = character;
                 index++;
                 cursor_pos++;
                 command[index] = '\0';
 
-                // Print the character and the rest of the command
-                printf("\033[s"); // Save cursor position
-                printf("\033[K"); // Clear from cursor to end of line
+                // print the character and the rest of the command
+                printf("\033[s"); // save cursor position
+                printf("\033[K"); // clear from cursor -> end of line
                 printf("%s", &command[cursor_pos - 1]);
-                printf("\033[u"); // Restore cursor position
+                printf("\033[u"); // restore cursor position
                 printf("%c", character);
                 fflush(stdout);
             }

@@ -11,7 +11,7 @@
 
 /* Function Definitions */
 
-void trim_whitespace(char *string)
+void trim_whitespace(char *string) // trims all white space between tokens. 
 {
     while (isspace((unsigned char)*string))
         string++;
@@ -34,10 +34,10 @@ int expand_wildcard(const char *pattern, char *expanded_args[], const int max_ar
 
     memset(&glob_result, 0, sizeof(glob_result));
 
-    // Wildcard expansion using glob
+    // wildcard expansion using glob
     if (glob(pattern, GLOB_TILDE, NULL, &glob_result) == 0)
     {
-        // Copy the expanded file paths into expanded_args
+        // copy the expanded file paths into expanded_args
         for (int i = 0; i < glob_result.gl_pathc && count < max_args; i++)
         {
             expanded_args[count] = strdup(glob_result.gl_pathv[i]);
@@ -51,11 +51,11 @@ int expand_wildcard(const char *pattern, char *expanded_args[], const int max_ar
     }
     else
     {
-        // No matches found, return 0 to indicate no expansion
+        // no matches found, return 0 to indicate no expansion
         count = 0;
     }
 
-    // Free glob memory
+    // free glob memory
     globfree(&glob_result);
 
     return count;
@@ -68,7 +68,7 @@ int tokenise(const char *line, char *tokens[])
 
     while (*currentCharPos  != '\0')
     {
-        // Skip leading whitespace
+        // skip leading whitespace/s
         while (isspace((unsigned char)*currentCharPos ))
         {
             currentCharPos ++;
@@ -139,7 +139,7 @@ int tokenise(const char *line, char *tokens[])
             }
             else
             {
-                // If variable is not found, replace with an empty string
+                // if variable not found, replace with an empty string
                 free(token);
                 token = strdup("");
             }
@@ -147,7 +147,7 @@ int tokenise(const char *line, char *tokens[])
 
         if (j > 0)
         {
-            if (i >= MAX_TOKENS)
+            if (i >= MAX_TOKENS) 
             {
                 fprintf(stderr, "Too many tokens\n");
                 exit(1);

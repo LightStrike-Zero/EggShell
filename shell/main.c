@@ -36,17 +36,17 @@ int main()
     while (1)
     {
         char command[MAX_COMMAND_LENGTH];
-        // Read user input
+        // read user input
         read_command(command);
 
-        // Execute commands
+        // executes commands
         if (strlen(command) > 0)
         {
             parse_commands(command);
         }
     }
 
-    return 0;
+    return 0; // exit 
 }
 
 void welcome_message()
