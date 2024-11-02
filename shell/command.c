@@ -10,6 +10,8 @@
 #include "command.h"
 #include "definitions.h"
 #include "history.h"
+#include "terminal.h"
+#include "token.h"
 
 /* System Includes */
 #include <stdio.h>
@@ -19,8 +21,6 @@
 #include <errno.h>
 #include <ctype.h>
 #include <glob.h>
-#include <terminal.h>
-#include <token.h>
 
 /* End Includes */
 
@@ -30,9 +30,10 @@ void read_command(char *command) {
     make_raw_terminal();
     
     size_t index = 0;
+    size_t cursor_pos = 0; // New cursor position variable
     printf("%s", PS1);
     fflush(stdout);
-    
+
     while (1) {
         char character;
         const int line = read(STDIN_FILENO, &character, 1);
@@ -53,18 +54,44 @@ void read_command(char *command) {
             break;
         }
         if (character == BACKSPACE || character == 8) {
-            if (index > 0) {
+            if (cursor_pos > 0 && index > 0) {
+                // Shift characters left from cursor position
+                memmove(&command[cursor_pos - 1], &command[cursor_pos], index - cursor_pos);
                 index--;
+                cursor_pos--;
                 command[index] = '\0';
-                printf("\b \b");
+
+                // Move cursor back, clear to end, and reprint the rest of the command
+                printf("\b");
+                printf("\033[K"); // Clear from cursor to end of line
+                printf("%s", &command[cursor_pos]);
+
+                // Move cursor back to the correct position
+                for (size_t i = cursor_pos; i < index; i++) {
+                    printf("\033[D"); // Move cursor left
+                }
                 fflush(stdout);
             }
         } else if (character == ESCAPE) {
-            handle_history_navigation(command, &index, PS1);
+            handle_history_navigation(command, &index, &cursor_pos, PS1);
+        } else if (character == 27) { // Handle other escape sequences
+            // Optionally handle more escape sequences here
+        } else if (character == '\t') {
+            // Handle tab completion if desired
         } else if (isprint(character)) {
             if (index < MAX_COMMAND_LENGTH - 1) {
-                command[index++] = character;
+                // Insert character at cursor position
+                memmove(&command[cursor_pos + 1], &command[cursor_pos], index - cursor_pos);
+                command[cursor_pos] = character;
+                index++;
+                cursor_pos++;
                 command[index] = '\0';
+
+                // Print the character and the rest of the command
+                printf("\033[s"); // Save cursor position
+                printf("\033[K"); // Clear from cursor to end of line
+                printf("%s", &command[cursor_pos - 1]);
+                printf("\033[u"); // Restore cursor position
                 printf("%c", character);
                 fflush(stdout);
             }

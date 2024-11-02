@@ -6,6 +6,7 @@
 /* Project Includes */
 #include <termios.h>
 
+
 /* Global Variables */
 extern struct termios original_terminal_input;
 

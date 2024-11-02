@@ -87,28 +87,30 @@ void pwd()
     }
 }
 
-void change_hostname()
-{
-    char new_hostname[MAX_COMMAND_LENGTH]; // buffer for the new hostname
+void change_hostname() {
+    char new_hostname[MAX_HOSTNAME_LENGTH];  // buffer for the new hostname
     printf("Enter new hostname: ");
-    if (fgets(new_hostname, sizeof(new_hostname), stdin) != NULL)
-    { // Remove the newline character, if present
-        const size_t len = strlen(new_hostname);
+    if (fgets(new_hostname, sizeof(new_hostname), stdin) != NULL) {
+        // Remove the newline character, if present
+        size_t len = strlen(new_hostname);
         if (len > 0 && new_hostname[len - 1] == '\n') {
             new_hostname[len - 1] = '\0';
         }
-        if (strlen(new_hostname) > 0 && strlen(new_hostname) < MAX_COMMAND_LENGTH)
-        {
-            snprintf(PS1, sizeof(PS1), "[%s] $", new_hostname);
+
+        // Make sure new_hostname does not exceed a safe length
+        if (strlen(new_hostname) > MAX_HOSTNAME_LENGTH - 1) {
+            printf("Hostname is too long. Maximum length is %d characters.\n", MAX_HOSTNAME_LENGTH - 1);
+            return;
+        }
+
+        // Write to PS1 with a safe format, limiting to MAX_PROMPT_LENGTH
+        int written = snprintf(PS1, MAX_PROMPT_LENGTH, "[%s] $", new_hostname);
+        if (written < 0 || written >= MAX_PROMPT_LENGTH) {
+            fprintf(stderr, "Warning: Hostname was truncated.\n");
+        } else {
             printf("Hostname has been changed.\n");
         }
-        else
-        {
-            printf("Invalid hostname.\n");
-        }
-    }
-    else
-    {
+    } else {
         perror("fgets");
     }
     fflush(stdout);

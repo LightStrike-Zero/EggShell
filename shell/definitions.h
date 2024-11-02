@@ -10,6 +10,8 @@
 #define MAX_TOKEN_LENGTH 1024
 #define HISTORY_SIZE 100
 #define MAX_COMMAND_LENGTH 1024
+#define MAX_HOSTNAME_LENGTH 1024
+#define MAX_PROMPT_LENGTH 1024
 
 /* Defines for keys */
 #define BACKSPACE 127
