@@ -28,20 +28,20 @@
 
 
 void read_command(char *command) {
-    // Set terminal to raw mode only if in an interactive terminal
+    // set terminal to raw mode for capturing input
     make_raw_terminal();
     
-    size_t index = 0;
-    size_t cursor_pos = 0; // New cursor position variable
-    printf("%s", PS1);
-    fflush(stdout);
+    size_t index = 0; // index for the command string
+    size_t cursor_pos = 0; // cursor pos variable
+    printf("%s", PS1); // print shell prompt
+    fflush(stdout); // flush output buffer 
 
     while (1) {
         char character;
-        const int line = read(STDIN_FILENO, &character, 1);
-        if (line == -1 && errno != EAGAIN) {
+        const int line = read(STDIN_FILENO, &character, 1); // read 1 character from standard input 
+        if (line == -1 && errno != EAGAIN) { // if error occurs while reading, print msg
             perror("Error reading input");
-            restore_terminal();
+            restore_terminal(); // restore terminal settings 
             break;
         }
         if (line == 0) {
@@ -51,18 +51,19 @@ void read_command(char *command) {
             exit(0);
         }
 
-        if (character == '\n') {
-            command[index] = '\0';
-            printf("\n");
+        if (character == '\n') {    // if user pressed enter 
+            command[index] = '\0';  // null terminate the command string
+            printf("\n");           // print newline
             break;
         }
         if (character == BACKSPACE || character == 8) {
+            // handle backspace character 
             if (cursor_pos > 0 && index > 0) {
                 // shift characters left from cursor position
                 memmove(&command[cursor_pos - 1], &command[cursor_pos], index - cursor_pos);
-                index--;
-                cursor_pos--;
-                command[index] = '\0';
+                index--; // decrease command length
+                cursor_pos--; // move cursor left
+                command[index] = '\0'; // null terminate command string
 
                 // move cursor back, clear to end, and reprint the rest of the command
                 printf("\b");
@@ -77,8 +78,6 @@ void read_command(char *command) {
             }
         } else if (character == ESCAPE) {
             handle_history_navigation(command, &index, &cursor_pos, PS1);
-        } else if (character == 27) {
-        } else if (character == '\t') {
         } else if (isprint(character)) {
             if (index < MAX_COMMAND_LENGTH - 1) {
                 // insert character at cursor position
@@ -99,9 +98,9 @@ void read_command(char *command) {
         }
     }
 
-    restore_terminal();  // Restore terminal settings at the end
+    restore_terminal();  // restore terminal settings at the end
 
-    // Handle history repetition if command starts with '!'
+    // handle history repetition if command starts with '!'
     if (command[0] == '!') {
         if (command[1] == '\0') {
             if (history_count > 0) {
@@ -118,30 +117,31 @@ void read_command(char *command) {
         }
     }
 
-    // Add command to history if it's not empty and doesn't start with '!'
+    // add command to history if it's not empty and doesn't start with '!'
     if (strlen(command) > 0 && command[0] != '!') {
         add_to_history(command);
     }
 }
-// Initialize the Command struct
+// initialise the Command struct
 void init_command(Command *cmd) {
-    cmd->original_command = NULL;
-    cmd->command_name = NULL;
-    memset(cmd->args, 0, sizeof(cmd->args));
-    cmd->arg_count = 0;
-    cmd->is_background = 0;
-    cmd->input_redirection = NULL;
-    cmd->output_redirection = NULL;
-    cmd->error_redirection = NULL;
-    cmd->append_output = 0;
-    cmd->next = NULL;
+    cmd->original_command = NULL;               // stores the original command string, set to NULL upon initialistion
+    cmd->command_name = NULL;                   // main command to be executed
+    memset(cmd->args, 0, sizeof(cmd->args));    // array of args for the command - set to 0 bc ensures all arg pointers initialised to NULL, preventing accidental access
+    cmd->arg_count = 0;                         // number of args
+    cmd->is_background = 0;                     // indicates if command should be run in the background
+    cmd->input_redirection = NULL;              // file to redirect input from
+    cmd->output_redirection = NULL;             // file to redirect output to 
+    cmd->error_redirection = NULL;              // file to redirect error output to 
+    cmd->append_output = 0;                     // indicates if output should be appended to the file 
+    cmd->next = NULL;                           // pointer to the next command in a pipeline. 
+
 }
 
-// Free memory allocated in Command struct
+// free memory allocated in Command struct
 void free_command(const Command *cmd) {
     if (cmd == NULL) return;
     free(cmd->original_command);
-    // Free each argument
+    // free each argument recursively 
     for (int i = 0; i < cmd->arg_count; i++) {
         free(cmd->args[i]);
     }
@@ -152,7 +152,7 @@ void free_command(const Command *cmd) {
     free(cmd->next);
 }
 
-// Helper function to handle wildcard expansion
+// helper function to handle wildcard expansion
 void expand_wildcards(const char *token, Command *cmd) {
     glob_t glob_output = {0};
     const int glob_result_code = glob(token, GLOB_TILDE, NULL, &glob_output);
@@ -162,12 +162,12 @@ void expand_wildcards(const char *token, Command *cmd) {
         }
         globfree(&glob_output);
     } else {
-        // No matches found, keep the token as is
+        // no matches found, keep the token as is
         cmd->args[cmd->arg_count++] = strdup(token);
     }
 }
 
-// Parse individual command string into Command struct
+// parse individual command string into Command struct
 int parse_command_string(const char *input, Command *cmd) {
 
     init_command(cmd);
@@ -193,7 +193,7 @@ int parse_command_string(const char *input, Command *cmd) {
         } else if (strcmp(token, "2>") == 0) {
             err_redirection = 1;
         } else if (strcmp(token, "|") == 0) {
-            // Handle pipeline
+            // handle pipeline
             if (i + 1 >= num_tokens) {
                 fprintf(stderr, "Error: Expected command after '|'\n");
                 return -1;
@@ -203,7 +203,7 @@ int parse_command_string(const char *input, Command *cmd) {
                 fprintf(stderr, "Memory allocation failed\n");
                 exit(1);
             }
-            // Construct remaining input for the next command
+            // construct remaining input for the next command
             char remaining_input[MAX_COMMAND_LENGTH] = "";
             for (int j = i + 1; j < num_tokens; j++) {
                 strcat(remaining_input, tokens[j]);
@@ -217,6 +217,7 @@ int parse_command_string(const char *input, Command *cmd) {
             }
             break;
         } else if (in_redirection) {
+            // setting flags for cmd
             cmd->input_redirection = strdup(token);
             in_redirection = 0;
         } else if (out_redirection) {
@@ -226,7 +227,7 @@ int parse_command_string(const char *input, Command *cmd) {
             cmd->error_redirection = strdup(token);
             err_redirection = 0;
         } else {
-            // Normal argument
+            // normal argument
             cmd->args[cmd->arg_count++] = strdup(token);
         }
         i++;
@@ -236,11 +237,11 @@ int parse_command_string(const char *input, Command *cmd) {
     if (cmd->arg_count > 0) {
         cmd->command_name = cmd->args[0];
     } else if (cmd->next == NULL) {
-        // No command to execute
+        // no command to execute
         return -1;
     }
 
-    // Free tokens
+    // free tokens
     for (int k = 0; k < num_tokens; k++) {
         free(tokens[k]);
     }
@@ -253,14 +254,14 @@ void parse_commands(const char *input_command) {
     char *separators[MAX_ARGS];
     int num_commands = 0;
 
-    // Copy input_command to a temporary buffer because strtok modifies the string
+    // copy input_command to a temporary buffer because strtok modifies the string
     char temp_input[MAX_COMMAND_LENGTH];
     strncpy(temp_input, input_command, MAX_COMMAND_LENGTH);
     temp_input[MAX_COMMAND_LENGTH - 1] = '\0';
 
     char *cmd_str = temp_input;
     while (cmd_str != NULL && num_commands < MAX_ARGS) {
-        // Find next occurrence of ';' or '&' not part of command arguments
+        // find next occurrence of ';' or '&' not part of command arguments
         char *sep = strpbrk(cmd_str, ";&");
         if (sep != NULL) {
             separators[num_commands] = strndup(sep, 1);
@@ -268,7 +269,7 @@ void parse_commands(const char *input_command) {
             commands_str[num_commands++] = cmd_str;
             cmd_str = sep + 1;
         } else {
-            // Last command without a following separator
+            // last command without a following separator
             commands_str[num_commands++] = cmd_str;
             separators[num_commands - 1] = NULL;
             break;
@@ -278,27 +279,27 @@ void parse_commands(const char *input_command) {
     for (int i = 0; i < num_commands; i++) {
         Command cmd;
         char *command_str = commands_str[i];
-        trim_whitespace(command_str);
+        trim_whitespace(command_str); // trims all whitespace from command
 
         if (strlen(command_str) == 0) {
             continue;
         }
 
-        // Initialize Command struct
+        // initialize Command struct
         if (parse_command_string(command_str, &cmd) != 0) {
             fprintf(stderr, "Failed to parse command: %s\n", command_str);
             continue;
         }
 
-        // Determine if the command should run in the background
+        // determine if the command should run in the background
         if (separators[i] != NULL && strcmp(separators[i], "&") == 0) {
             cmd.is_background = 1;
         }
 
-        // Execute the command
+        // execute the command
         execute_command(&cmd);
 
-        // Free allocated memory
+        // free allocated memory
         free_command(&cmd);
         free(separators[i]);
     }
@@ -327,6 +328,7 @@ void execute_command(Command *cmd) {
 }
 
 int handle_builtin_commands(Command *cmd) {
+    // string compares to check if input = a built in command
     if (strcmp(cmd->command_name, "exit") == 0) {
         exit_shell();
         return 1;
