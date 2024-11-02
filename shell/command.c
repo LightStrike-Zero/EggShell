@@ -37,7 +37,7 @@ void read_command(char *command) {
         char character;
         const int line = read(STDIN_FILENO, &character, 1);
         if (line == -1 && errno != EAGAIN) {
-            perror("read");
+            perror("Error reading input");
             break;
         }
         if (line == 0) {

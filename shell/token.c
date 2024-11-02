@@ -119,6 +119,32 @@ int tokenise(const char *line, char *tokens[])
         }
         token[j] = '\0';
 
+        // Perform variable expansion if token starts with $
+        if (token[0] == '$' && strlen(token) > 1)
+        {
+            // Remove the $ to get the environment variable name
+            const char *env_var_name = token + 1;
+            const char *env_var_value = getenv(env_var_name);
+
+            if (env_var_value != NULL)
+            {
+                // Replace token with the environment variable's value
+                free(token);
+                token = strdup(env_var_value);
+                if (token == NULL)
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    exit(1);
+                }
+            }
+            else
+            {
+                // If variable is not found, replace with an empty string
+                free(token);
+                token = strdup("");
+            }
+        }
+
         if (j > 0)
         {
             if (i >= MAX_TOKENS)

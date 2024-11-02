@@ -33,9 +33,17 @@
 // defined in definitions.c and allocated here.
 char PS1[MAX_COMMAND_LENGTH] = "%";
 
+extern char **environ;
+
+/**
+ * @brief Main function for the shell
+ *
+ * @return int
+ */
 int main()
 {
     int rows, cols; // for terminal size. 
+    char **env = environ;
 
     // set up signal handlers
     setup_signal_handlers();
