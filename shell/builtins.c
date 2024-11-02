@@ -18,10 +18,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <unistd.h> // for read, write, and close
+#include <sys/types.h> // definitions for pid_t, size_t
+#include <sys/socket.h> // networks comms - incl. definitions for address families, socket types, etc.
+#include <netinet/in.h> // sockaddr_in, etc - necessary for TCP
 #include <arpa/inet.h>
 #include <linux/limits.h>
 
