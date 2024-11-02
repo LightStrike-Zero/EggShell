@@ -1,239 +1,304 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <string.h>
+/**
+ * @file server.c
+ * @brief Server implementation for custom Telnet-like shell
+ *
+ * This server listens on a specified port, accepts incoming client connections,
+ * allocates PTYs, spawns shell processes, and relays data between clients and shells.
+ */
+
+#include <pty.h>
+#include <termios.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
 #include <sys/select.h>
-#include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <signal.h>
 #include <sys/wait.h>
-#include <fcntl.h>
 
-#define BUFFER_SIZE 1024
-#define USERNAME_LENGTH 30
-#define PASSWORD_LENGTH 12
-#define PORT 40210
-#define CUSTOM_SHELL_PATH "../shell/egg_shell"
+#define BUFFER_SIZE 4096
+/* Constants */
+#define DEFAULT_PORT 40210
+#define BACKLOG 10          // Number of pending connections queue will hold
+#define BUFFER_SIZE 4096    // Buffer size for data relay
 
-#define DEBUG 1
-
-#define DEBUG_PRINT(fmt, ...) \
-    do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
-
-struct ClientInfo {
-    int client_socket;
-    pid_t pid;
-};
-
-struct UserTable {
-    char username[USERNAME_LENGTH];
-    char password[PASSWORD_LENGTH];
-} userTable = {"test", "test"};
-
-struct ClientInfo client_list[100];
-int client_count = 0;
-
-int setup_server_socket(int port);
-int authenticate(int client_fd);
+/* Function Declarations */
+void setup_server(int *server_fd, int port);
 void handle_client(int client_fd);
-ssize_t strip_cr(char *buffer, ssize_t nbytes);
-void sigchld_handler(int signum);
+void relay_data(int master_fd, int client_fd);
+void reap_zombie_processes(int signo);
+void setup_signal_handlers();
 
-int main() {
-    struct sigaction sa;
-    sa.sa_handler = sigchld_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
+/**
+ * @brief Entry point for the server application.
+ */
+int main(int argc, char *argv[]) {
+    int server_fd, port = DEFAULT_PORT;
 
-    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
-        perror("sigaction");
-        exit(1);
+    /* Optionally, allow port to be specified via command-line arguments */
+    if (argc == 2) {
+        port = atoi(argv[1]);
+        if (port <= 0 || port > 65535) {
+            fprintf(stderr, "Invalid port number: %s\n", argv[1]);
+            exit(EXIT_FAILURE);
+        }
     }
 
-    int server_fd = setup_server_socket(PORT);
+    /* Setup signal handlers */
+    setup_signal_handlers();
 
+    /* Initialize and bind the server socket */
+    setup_server(&server_fd, port);
+    printf("Server listening on port %d\n", port);
+
+    /* Main loop: accept and handle incoming connections */
     while (1) {
-        struct sockaddr_in cli_addr;
-        socklen_t clilen = sizeof(cli_addr);
-
-        int client_fd = accept(server_fd, (struct sockaddr *)&cli_addr, &clilen);
-        if (client_fd < 0) {
-            perror("Error on accept");
+        struct sockaddr_in client_addr;
+        socklen_t sin_size = sizeof(client_addr);
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &sin_size);
+        if (client_fd == -1) {
+            perror("accept");
             continue;
         }
 
+        printf("Received connection from %s:%d\n",
+               inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+        /* Fork a child process to handle the client */
         pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            close(client_fd);
+            continue;
+        }
+
         if (pid == 0) {
-            close(server_fd);
+            /* Child Process */
+            close(server_fd); // Child doesn't need the listening socket
             handle_client(client_fd);
-            exit(0);
-        } else if (pid > 0) {
-            if (client_count < 100) {
-                client_list[client_count].client_socket = client_fd;
-                client_list[client_count].pid = pid;
-                client_count++;
-            } else {
-                perror("Max client limit reached.");
-                close(client_fd);
-            }
             close(client_fd);
+            exit(EXIT_SUCCESS);
         } else {
-            perror("Fork failed");
-            close(client_fd);
+            /* Parent Process */
+            close(client_fd); // Parent doesn't need the connected socket
         }
     }
 
+    /* Close the server socket (unreachable in this example) */
     close(server_fd);
     return 0;
 }
 
-int setup_server_socket(int port) {
-    int sockfd;
-    struct sockaddr_in serv_addr;
+/**
+ * @brief Sets up the server socket.
+ *
+ * @param server_fd Pointer to store the server socket file descriptor.
+ * @param port Port number to bind the server to.
+ */
+void setup_server(int *server_fd, int port) {
+    struct sockaddr_in server_addr;
+    int yes = 1;
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        perror("Error opening socket");
-        exit(1);
+    /* Create a TCP socket */
+    if ((*server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("socket");
+        exit(EXIT_FAILURE);
     }
 
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(port);
-
-    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("Error on binding");
-        close(sockfd);
-        exit(1);
+    /* Avoid "Address already in use" error */
+    if (setsockopt(*server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+        perror("setsockopt");
+        close(*server_fd);
+        exit(EXIT_FAILURE);
     }
 
-    if (listen(sockfd, 5) < 0) {
-        perror("Error on listen");
-        close(sockfd);
-        exit(1);
+    /* Bind the socket to the specified port */
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY; // Listen on all interfaces
+    server_addr.sin_port = htons(port);
+    memset(&(server_addr.sin_zero), '\0', 8); // Zero the rest of the struct
+
+    if (bind(*server_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
+        perror("bind");
+        close(*server_fd);
+        exit(EXIT_FAILURE);
     }
 
-    printf("Server listening on port %d\n", port);
-    return sockfd;
-}
-
-ssize_t strip_cr(char *buffer, ssize_t nbytes) {
-    ssize_t j = 0;
-    for (ssize_t i = 0; i < nbytes; i++) {
-        if (buffer[i] != '\r') {
-            buffer[j++] = buffer[i];
-        }
-    }
-    buffer[j] = '\0';
-    return j;
-}
-
-int authenticate(int client_fd) {
-    char buffer[USERNAME_LENGTH + PASSWORD_LENGTH + 1];
-    int n = read(client_fd, buffer, sizeof(buffer) - 1);
-    if (n <= 0) {
-        perror("Error reading from client");
-        return 0;
-    }
-
-    buffer[n] = '\0';
-    ssize_t clean_nbytes = strip_cr(buffer, n);
-    buffer[clean_nbytes] = '\0';
-
-    char received_username[USERNAME_LENGTH], received_password[PASSWORD_LENGTH];
-    sscanf(buffer, "%29s %11s", received_username, received_password);
-
-    if (strcmp(received_username, userTable.username) == 0 &&
-        strcmp(received_password, userTable.password) == 0) {
-        write(client_fd, "Authentication successful\n", strlen("Authentication successful\n"));
-        return 1;
-    } else {
-        write(client_fd, "Authentication failed\n", strlen("Authentication failed\n"));
-        return 0;
+    /* Start listening on the socket */
+    if (listen(*server_fd, BACKLOG) == -1) {
+        perror("listen");
+        close(*server_fd);
+        exit(EXIT_FAILURE);
     }
 }
 
+/**
+ * @brief Handles an individual client connection.
+ *
+ * @param client_fd The connected client socket file descriptor.
+ */
 void handle_client(int client_fd) {
-    int shell_to_server[2];  // Pipe from shell stdout to server
-    int server_to_shell[2];  // Pipe from server to shell stdin
+    int master_fd, slave_fd;
+    pid_t shell_pid;
+    char slave_name[100];
+    struct termios termp;
+    struct winsize winp;
 
-    if (pipe(shell_to_server) == -1 || pipe(server_to_shell) == -1) {
-        perror("pipe failed");
+    /* Initialize termios and winsize if needed */
+    tcgetattr(STDIN_FILENO, &termp);
+    ioctl(STDIN_FILENO, TIOCGWINSZ, &winp);
+
+    /* Open PTY */
+    if (openpty(&master_fd, &slave_fd, slave_name, &termp, &winp) == -1) {
+        perror("openpty");
         close(client_fd);
         return;
     }
 
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(server_to_shell[0], STDIN_FILENO);  // Read from server to shell pipe as stdin
-        dup2(shell_to_server[1], STDOUT_FILENO); // Write to shell to server pipe as stdout
-        dup2(shell_to_server[1], STDERR_FILENO); // Redirect stderr to the same pipe for consistency
+    /* Fork to create the shell process */
+    shell_pid = fork();
+    if (shell_pid < 0) {
+        perror("fork");
+        close(master_fd);
+        close(slave_fd);
+        close(client_fd);
+        return;
+    }
 
-        close(shell_to_server[0]);
-        close(server_to_shell[1]);
+    if (shell_pid == 0) {
+        /* Grandchild Process: Execute Shell */
+        close(master_fd); // Close master in child
 
-        execl(CUSTOM_SHELL_PATH, CUSTOM_SHELL_PATH, NULL);
-        perror("execl failed");
-        exit(1);
-    } else if (pid > 0) {
-        close(shell_to_server[1]);
-        close(server_to_shell[0]);
-
-        char buffer[BUFFER_SIZE];
-        ssize_t bytes_read;
-        char output_buffer[BUFFER_SIZE * 4];  // Accumulate output for each command
-        int output_len = 0;
-
-        while (1) {
-            bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-            if (bytes_read <= 0) {
-                DEBUG_PRINT("Client disconnected or read error for client fd: %d\n", client_fd);
-                break;
-            }
-            buffer[bytes_read] = '\0';
-
-            write(server_to_shell[1], buffer, bytes_read);
-            write(server_to_shell[1], "\n", 1);
-
-            output_len = 0;
-            while ((bytes_read = read(shell_to_server[0], buffer, sizeof(buffer) - 1)) > 0) {
-                buffer[bytes_read] = '\0';
-                strncpy(output_buffer + output_len, buffer, sizeof(output_buffer) - output_len - 1);
-                output_len += bytes_read;
-                output_buffer[output_len] = '\0';
-
-                if (strstr(output_buffer, "%") != NULL) {
-                    DEBUG_PRINT("End of command output detected for client fd %d\n", client_fd);
-                    break;
-                }
-            }
-
-            write(client_fd, output_buffer, output_len);
-
-            memset(output_buffer, 0, sizeof(output_buffer));
+        /* Set the slave PTY as the controlling terminal */
+        if (setsid() == -1) {
+            perror("setsid");
+            exit(EXIT_FAILURE);
         }
 
-        close(client_fd);
-        close(shell_to_server[0]);
-        close(server_to_shell[1]);
-        waitpid(pid, NULL, 0);
-        DEBUG_PRINT("Closed connection and cleaned up for client fd: %d\n", client_fd);
-    } else {
-        perror("fork failed");
-        close(client_fd);
-        close(shell_to_server[0]);
-        close(shell_to_server[1]);
-        close(server_to_shell[0]);
-        close(server_to_shell[1]);
+        if (ioctl(slave_fd, TIOCSCTTY, NULL) == -1) {
+            perror("ioctl TIOCSCTTY");
+            exit(EXIT_FAILURE);
+        }
+
+        /* Duplicate slave_fd to standard streams */
+        dup2(slave_fd, STDIN_FILENO);
+        dup2(slave_fd, STDOUT_FILENO);
+        dup2(slave_fd, STDERR_FILENO);
+
+        if (slave_fd > STDERR_FILENO) {
+            close(slave_fd);
+        }
+
+        /* Optionally, set the TERM environment variable */
+        setenv("TERM", "xterm-256color", 1);
+
+        /* Execute the custom shell */
+        execl("../shell/egg_shell", "egg_shell", NULL);
+
+        /* If exec fails */
+        perror("execl");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Parent Process */
+    close(slave_fd); // Close slave in parent
+
+    /* Relay data between master PTY and client socket */
+    relay_data(master_fd, client_fd);
+
+    /* Cleanup */
+    close(master_fd);
+    kill(shell_pid, SIGKILL);
+    waitpid(shell_pid, NULL, 0);
+    close(client_fd);
+}
+
+/**
+ * @brief Relays data between the PTY master and the client socket.
+ *
+ * @param master_fd The PTY master file descriptor.
+ * @param client_fd The client socket file descriptor.
+ */
+void relay_data(int master_fd, int client_fd) {
+    fd_set read_fds;
+    int max_fd = (master_fd > client_fd) ? master_fd : client_fd;
+    char buffer[BUFFER_SIZE];
+    int nbytes;
+
+    while (1) {
+        FD_ZERO(&read_fds);
+        FD_SET(master_fd, &read_fds);
+        FD_SET(client_fd, &read_fds);
+
+        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+            perror("select");
+            break;
+        }
+
+        // Data from PTY master to client
+        if (FD_ISSET(master_fd, &read_fds)) {
+            nbytes = read(master_fd, buffer, sizeof(buffer));
+            if (nbytes <= 0) {
+                // EOF or error
+                break;
+            }
+            if (write(client_fd, buffer, nbytes) != nbytes) {
+                perror("write to client");
+                break;
+            }
+        }
+
+        // Data from client to PTY master
+        if (FD_ISSET(client_fd, &read_fds)) {
+            nbytes = read(client_fd, buffer, sizeof(buffer));
+            if (nbytes <= 0) {
+                // EOF or error
+                break;
+            }
+            if (write(master_fd, buffer, nbytes) != nbytes) {
+                perror("write to master pty");
+                break;
+            }
+        }
     }
 }
 
-void sigchld_handler(int signum) {
-    int saved_errno = errno;
+/**
+ * @brief Signal handler to reap zombie child processes.
+ *
+ * @param signo The signal number.
+ */
+void reap_zombie_processes(int signo) {
+    (void)signo; // Unused parameter
     while (waitpid(-1, NULL, WNOHANG) > 0);
-    errno = saved_errno;
 }
+
+/**
+ * @brief Sets up signal handlers for the server.
+ */
+void setup_signal_handlers() {
+    struct sigaction sa;
+
+    /* Reap zombie child processes */
+    sa.sa_handler = reap_zombie_processes;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("sigaction SIGCHLD");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Ignore SIGPIPE to prevent server from crashing when writing to a closed socket */
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGPIPE, &sa, NULL) == -1) {
+        perror("sigaction SIGPIPE");
+        exit(EXIT_FAILURE);
+    }
+}
+

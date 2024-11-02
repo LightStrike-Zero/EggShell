@@ -53,10 +53,10 @@ void welcome_message()
 {
 
 
-    printf(BRIGHT_MAGENTA   " _______               "BLUE"        __           __ __  "RESET"\n");
-    printf(BRIGHT_MAGENTA   "|    ___|.-----.-----. "BLUE"-----.|  |--.-----.|  |  |  "RESET"\n");
-    printf(BRIGHT_MAGENTA   "|    ___||  _  |  _  | "BLUE"__ --||     |  -__||  |  |  "RESET"\n");
-    printf(PINK             "|_______||___  |___  | "BRIGHT_BLUE"_____||__|__|_____||__|__|  "RESET"\n");
-    printf(PINK             "         |_____|_____| "BRIGHT_BLUE"                            "RESET"\n");
+    printf(BRIGHT_MAGENTA   " _______              "BLUE"       __           __ __  "RESET"\n");
+    printf(BRIGHT_MAGENTA   "|    ___|.-----.-----."BLUE"-----.|  |  .-----.|  |  |  "RESET"\n");
+    printf(BRIGHT_MAGENTA   "|    ___||  _  |  _  |"BLUE"__ --||   -\\|  -__||  |  |  "RESET"\n");
+    printf(PINK             "|_______||___  |___  |"BRIGHT_BLUE"_____||__|__|_____||__|__|  "RESET"\n");
+    printf(PINK             "         |_____|_____|"BRIGHT_BLUE"                            "RESET"\n");
     printf(BRIGHT_MAGENTA    "Developed by "PINK"Louise Barjaktarevic "BRIGHT_BLUE"& "BLUE"Shaun Matthews\n"RESET);
 }

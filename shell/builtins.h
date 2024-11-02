@@ -31,11 +31,28 @@ void cd(const char *path);
 void pwd();
 
 /**
- * @brief Connects to a server using the specified hostname and port
- * @param hostname The hostname or IP address of the server
- * @param port The port to connect to on the server
+ * Connects to a remote server and facilitates data exchange.
+ *
+ * @param hostname The server's hostname or IP address.
+ * @param port The server's port number.
  */
 void connect_to_server(char *hostname, const int port);
+
+/**
+ * Relays data between stdin and the connected socket.
+ *
+ * @param sockfd The connected socket file descriptor.
+ */
+void relay_data(int sockfd);
+
+/**
+ * Creates a TCP socket and connects to the specified hostname and port.
+ *
+ * @param hostname The server's hostname or IP address.
+ * @param port The server's port number.
+ * @return The connected socket file descriptor, or -1 on failure.
+ */
+int create_and_connect_socket(const char *hostname, const int port);
 
 /**
  * @brief Displays a manual of available commands

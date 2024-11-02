@@ -21,10 +21,12 @@
 #include <unistd.h> // for read, write, and close
 #include <sys/types.h> // definitions for pid_t, size_t
 #include <sys/socket.h> // networks comms - incl. definitions for address families, socket types, etc.
-#include <netinet/in.h> // sockaddr_in, etc - necessary for TCP
-#include <arpa/inet.h>
 #include <linux/limits.h>
-
+#include <sys/select.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 /* End Includes */
 
 void change_directory(const char *path) {
@@ -123,17 +125,30 @@ void set_prompt(const char *new_prompt) {
     fflush(stdout);
 }
 
-void man()
-{
-    // displays user manual.
-    // list of available commands
-    //TODO shaun to fix this
-    printf("This is Eggshell's user manual.\n"
-           "Available commands:\n"
-           "Usage: <prompt> $ <command>\n"
-            "pwd -     Prints the working directory.\n"
-           "history - Use up and down arrow keys to toggle through command history.\n"
-           "exit -    Exit shell. Bye Bye.\n");
+void man() {
+    // Displays the user manual with descriptions of available commands and features.
+    printf("Eggshell User Manual\n");
+    printf("This shell provides the following commands and features:\n\n");
+
+    // Usage and prompt configuration
+    printf("Usage:\n");
+    printf("\t\t<prompt>\t$ <command>\n");
+    printf("  Use the command prompt to execute commands and access shell features.\n\n");
+
+    printf("Available Commands:\n");
+
+    // Built-in commands
+    printf("\tprompt\n");
+
+    printf("\tpwd\n");
+
+    printf("\tcd\n");
+
+    printf("\thistory\n");
+
+    printf("\texit\n");
+
+    printf("End of manual.\n");
 }
 
 void error(const char *msg) {
@@ -142,102 +157,128 @@ void error(const char *msg) {
 }
 
 void connect_to_server(char *hostname, const int port) {
-    struct sockaddr_in server_addr;
-    char buffer[1024];
+    int sockfd;
 
-    const int socket_file_descriptor = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_file_descriptor < 0) {
-        perror("Socket creation failed");
-        return;
-    }
-
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-
-    if (inet_pton(AF_INET, hostname, &server_addr.sin_addr) <= 0) {
-        perror("Invalid address/Address not supported");
-        close(socket_file_descriptor);
-        return;
-    }
-
-    if (connect(socket_file_descriptor, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Connection failed");
-        close(socket_file_descriptor);
+    // Create and connect the socket
+    sockfd = create_and_connect_socket(hostname, port);
+    if (sockfd == -1) {
+        fprintf(stderr, "Failed to establish connection to %s:%d\n", hostname, port);
         return;
     }
 
     printf("Connected to %s:%d\n", hostname, port);
+    printf("Type your commands below. Press Ctrl+D to disconnect.\n");
 
-    char username[256];
-    char password[256];
+    // Relay data between stdin and socket
+    relay_data(sockfd);
 
-    printf("Username: ");
-    fflush(stdout);
-    fgets(username, sizeof(username), stdin);
-    username[strcspn(username, "\n")] = '\0';
+    printf("Connection closed.\n");
+}
 
-    printf("Password: ");
-    fflush(stdout);
-    fgets(password, sizeof(password), stdin);
-    printf("\n");
-    password[strcspn(password, "\n")] = '\0';
-
-    snprintf(buffer, sizeof(buffer), "%s %s", username, password);
-    send(socket_file_descriptor, buffer, strlen(buffer), 0);
-
-    ssize_t bytes_received = recv(socket_file_descriptor, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_received < 0) {
-        perror("Error receiving data from server");
-        close(socket_file_descriptor);
-        return;
-    }
-
-    buffer[bytes_received] = '\0';
-    printf("Server response: %s\n", buffer);
-
-    if (strstr(buffer, "Authentication successful") != NULL) {
-        printf("Logged in successfully.\n");
-    } else {
-        printf("Authentication failed.\n");
-        close(socket_file_descriptor);
-        return;
-    }
+void relay_data(int sockfd) {
+    fd_set read_fds;
+    int max_fd = (sockfd > STDIN_FILENO) ? sockfd : STDIN_FILENO;
+    char buffer[4096];
+    int n;
 
     while (1) {
-        printf("Remote shell> ");
-        fflush(stdout);
+        FD_ZERO(&read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+        FD_SET(sockfd, &read_fds);
 
-        char command[1024];
-        if (fgets(command, sizeof(command), stdin) == NULL) {
-            printf("\nDisconnecting...\n");
+        // Wait for data on either stdin or socket
+        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+            perror("select");
             break;
         }
 
-        command[strcspn(command, "\n")] = '\0';
+        // Check if data is available on stdin
+        if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+            n = read(STDIN_FILENO, buffer, sizeof(buffer));
+            if (n < 0) {
+                perror("read from stdin");
+                break;
+            } else if (n == 0) {
+                // EOF (Ctrl+D)
+                printf("\nDisconnected from server.\n");
+                break;
+            }
 
-        if (strcmp(command, "exit") == 0 || strcmp(command, "logout") == 0 || strcmp(command, "quit") == 0) {
-            printf("Disconnecting...\n");
-            break;
-        }
-
-        if (send(socket_file_descriptor, command, strlen(command), 0) < 0) {
-            perror("Error sending command to server");
-            break;
-        }
-
-        while ((bytes_received = recv(socket_file_descriptor, buffer, sizeof(buffer) - 1, 0)) > 0) {
-            buffer[bytes_received] = '\0';
-            printf("%s", buffer);
-            if (strstr(buffer, "%")) {
+            // Send data to server
+            if (write(sockfd, buffer, n) != n) {
+                perror("write to socket");
                 break;
             }
         }
 
-        send(socket_file_descriptor, "READY", 5, 0);
+        // Check if data is available on the socket
+        if (FD_ISSET(sockfd, &read_fds)) {
+            n = read(sockfd, buffer, sizeof(buffer));
+            if (n < 0) {
+                perror("read from socket");
+                break;
+            } else if (n == 0) {
+                // Server closed connection
+                printf("\nServer closed the connection.\n");
+                break;
+            }
+
+            // Write data to stdout
+            if (write(STDOUT_FILENO, buffer, n) != n) {
+                perror("write to stdout");
+                break;
+            }
+        }
     }
 
-    close(socket_file_descriptor);
+    // Cleanup
+    close(sockfd);
+}
+
+int create_and_connect_socket(const char *hostname, const int port) {
+    int sockfd;
+    struct addrinfo hints, *servinfo, *p;
+    int rv;
+    char port_str[6]; // Max port number is 65535
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;      // IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;  // TCP
+
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+    if ((rv = getaddrinfo(hostname, port_str, &hints, &servinfo)) != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        return -1;
+    }
+
+    // Loop through all the results and connect to the first possible
+    for (p = servinfo; p != NULL; p = p->ai_next) {
+        // Create socket
+        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("socket");
+            continue;
+        }
+
+        // Connect to server
+        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("connect");
+            continue;
+        }
+
+        break; // Successfully connected
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "Failed to connect to %s:%d\n", hostname, port);
+        freeaddrinfo(servinfo);
+        return -1;
+    }
+
+    freeaddrinfo(servinfo); // All done with this structure
+
+    return sockfd;
 }
 
 void exit_shell() {
