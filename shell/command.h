@@ -30,5 +30,16 @@ int parse_command_string(const char *input, Command *cmd);
 void free_command(const Command *cmd);
 void execute_command(Command *cmd);
 void parse_commands(const char *input_command);
+void execute_command(Command *cmd);
+int handle_builtin_commands(Command *cmd);
+void handle_connect_command(Command *cmd);
+
+void wait_for_children(int is_background, int num_pipes);
+void handle_redirections(const Command *cmd);
+int count_pipes(const Command *cmd);
+int setup_pipes(int *pipefds, int num_pipes);
+void execute_with_pipes(Command *cmd, int *pipefds, int num_pipes);
+void manage_pipes(int *pipefds, int cmd_index, int num_pipes, int has_next);
+void close_pipes(int *pipefds, int num_pipes);
 
 #endif

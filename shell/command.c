@@ -12,6 +12,7 @@
 #include "history.h"
 #include "terminal.h"
 #include "token.h"
+#include "builtins.h"
 
 /* System Includes */
 #include <stdio.h>
@@ -21,6 +22,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <glob.h>
+#include <sys/wait.h>
 
 /* End Includes */
 
@@ -301,3 +303,147 @@ void parse_commands(const char *input_command) {
         free(separators[i]);
     }
 }
+
+void execute_command(Command *cmd) {
+    if (cmd == NULL || cmd->command_name == NULL) {
+        return;
+    }
+
+    if (handle_builtin_commands(cmd)) {
+        return;
+    }
+
+    int num_pipes = count_pipes(cmd);
+    int pipefds[2 * num_pipes];
+
+    if (!setup_pipes(pipefds, num_pipes)) {
+        return;
+    }
+
+    execute_with_pipes(cmd, pipefds, num_pipes);
+
+    close_pipes(pipefds, num_pipes);
+    wait_for_children(cmd->is_background, num_pipes);
+}
+
+int handle_builtin_commands(Command *cmd) {
+    if (strcmp(cmd->command_name, "exit") == 0) {
+        exit_shell();
+        return 1;
+    } else if (strcmp(cmd->command_name, "history") == 0) {
+        show_history();
+        return 1;
+    } else if (strcmp(cmd->command_name, "pwd") == 0) {
+        pwd();
+        return 1;
+    } else if (strcmp(cmd->command_name, "man") == 0) {
+        man();
+        return 1;
+    } else if (strcmp(cmd->command_name, "prompt") == 0) {
+        set_prompt(cmd->args[1]);
+        return 1;
+    } else if (strcmp(cmd->command_name, "cd") == 0) {
+        cd(cmd->arg_count > 1 ? cmd->args[1] : NULL);
+        return 1;
+    } else if (strcmp(cmd->command_name, "connect") == 0) {
+        handle_connect_command(cmd);
+        return 1;
+    }
+    return 0;
+}
+
+void handle_connect_command(Command *cmd) {
+    if (cmd->arg_count == 3) {
+        connect_to_server(cmd->args[1], atoi(cmd->args[2]));
+    } else if (cmd->arg_count == 2) {
+        connect_to_server(cmd->args[1], 40210);
+    } else {
+        fprintf(stderr, "Usage: connect <hostname> || connect <hostname> <port>\n");
+    }
+}
+
+void handle_redirections(const Command *cmd) {
+    if (cmd->input_redirection) {
+        freopen(cmd->input_redirection, "r", stdin);
+    }
+    if (cmd->output_redirection) {
+        freopen(cmd->output_redirection, cmd->append_output ? "a" : "w", stdout);
+    }
+    if (cmd->error_redirection) {
+        freopen(cmd->error_redirection, "w", stderr);
+    }
+}
+
+void wait_for_children(int is_background, int num_pipes) {
+    if (!is_background) {
+        for (int i = 0; i <= num_pipes; i++) {
+            wait(NULL);
+        }
+    } else {
+        printf("[Background PID: %d]\n", getpid());
+    }
+}
+
+int count_pipes(const Command *cmd) {
+    int num_pipes = 0;
+    while (cmd->next != NULL) {
+        num_pipes++;
+        cmd = cmd->next;
+    }
+    return num_pipes;
+}
+
+int setup_pipes(int *pipefds, int num_pipes) {
+    for (int i = 0; i < num_pipes; i++) {
+        if (pipe(pipefds + i * 2) < 0) {
+            perror("pipe");
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void execute_with_pipes(Command *cmd, int *pipefds, int num_pipes) {
+    int pid, cmd_index = 0;
+    const Command *current_cmd = cmd;
+
+    while (current_cmd != NULL) {
+        pid = fork();
+        if (pid == 0) {
+            handle_redirections(current_cmd);
+            manage_pipes(pipefds, cmd_index, num_pipes, current_cmd->next != NULL);
+            execvp(current_cmd->command_name, current_cmd->args);
+            perror("execvp");
+            exit(EXIT_FAILURE);
+        } else if (pid < 0) {
+            perror("fork");
+            return;
+        }
+
+        current_cmd = current_cmd->next;
+        cmd_index++;
+    }
+}
+
+void manage_pipes(int *pipefds, int cmd_index, int num_pipes, int has_next) {
+    if (cmd_index != 0) {
+        if (dup2(pipefds[(cmd_index - 1) * 2], STDIN_FILENO) < 0) {
+            perror("dup2");
+            exit(EXIT_FAILURE);
+        }
+    }
+    if (has_next) {
+        if (dup2(pipefds[cmd_index * 2 + 1], STDOUT_FILENO) < 0) {
+            perror("dup2");
+            exit(EXIT_FAILURE);
+        }
+    }
+    close_pipes(pipefds, num_pipes);
+}
+
+void close_pipes(int *pipefds, int num_pipes) {
+    for (int i = 0; i < 2 * num_pipes; i++) {
+        close(pipefds[i]);
+    }
+}
+
