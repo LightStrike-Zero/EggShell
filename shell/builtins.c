@@ -166,33 +166,37 @@ void connect_to_server(char *hostname, const int port) {
         return;
     }
 
-    // Prompt for username and password
-    char username[MAX_USERNAME_LENGTH];
-    char password[MAX_PASSWORD_LENGTH];
-    printf("Username: ");
-    fgets(username, sizeof(username), stdin);
-    username[strcspn(username, "\n")] = '\0';
+    char buffer[BUFFER_SIZE];
 
-    printf("Password: ");
-    fgets(password, sizeof(password), stdin);
-    password[strcspn(password, "\n")] = '\0';
+    // Read and respond to authentication prompts
+    for (int i = 0; i < 2; ++i) {  // Expect two prompts (username and password)
+        int nbytes = read(socket, buffer, sizeof(buffer) - 1);
+        if (nbytes <= 0) {
+            close(socket);
+            return;
+        }
+        buffer[nbytes] = '\0';
+        printf("%s", buffer);  // Print the prompt from server (if you want)
 
-    // transmit username and password
-    dprintf(socket, "%s\n", username);
-    dprintf(socket, "%s\n", password);
+        // Get user input
+        fgets(buffer, sizeof(buffer), stdin);
+        buffer[strcspn(buffer, "\n")] = '\0';
 
-    // check response
-    char response[BUFFER_SIZE];
-    const int bytes_received = read(socket, response, sizeof(response) - 1);
-    if (bytes_received <= 0) {
-        perror("read");
+        // Send user input to server
+        dprintf(socket, "%s\n", buffer);
+    }
+
+    // Check server's response
+    int nbytes = read(socket, buffer, sizeof(buffer) - 1);
+    if (nbytes <= 0) {
         close(socket);
         return;
     }
-    response[bytes_received] = '\0';
-    printf("%s", response);
+    buffer[nbytes] = '\0';
+    printf("%s", buffer);
 
-    if (strstr(response, "Authentication successful") == NULL) {
+    // If authentication fails, close connection
+    if (strstr(buffer, "Authentication successful") == NULL) {
         close(socket);
         return;
     }

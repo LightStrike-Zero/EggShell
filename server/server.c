@@ -147,7 +147,6 @@ void setup_server(int *server_fd, const int port) {
  */
 void handle_client(const int client_fd) {
 
-    // load users
     if (user_count == 0 && !load_users()) {
         log_event("Failed to load user credentials.\n");
         close(client_fd);
@@ -156,30 +155,37 @@ void handle_client(const int client_fd) {
 
     char username[MAX_USERNAME_LENGTH];
     char password[MAX_PASSWORD_LENGTH];
-    char buffer[BUFFER_SIZE];
+    int nbytes;
 
-    // authentication
+    // Prompt for username and receive input
     write(client_fd, "Username: ", 10);
-    int nbytes = read(client_fd, username, MAX_USERNAME_LENGTH - 1);
+    nbytes = read(client_fd, username, MAX_USERNAME_LENGTH - 1);
     if (nbytes <= 0) {
+        send_response(client_fd, DISCONNECTION_NOTICE, "Disconnected during username input.");
         close(client_fd);
         return;
     }
     username[nbytes - 1] = '\0';
+
+    // Prompt for password and receive input
     write(client_fd, "Password: ", 10);
     nbytes = read(client_fd, password, MAX_PASSWORD_LENGTH - 1);
     if (nbytes <= 0) {
+        send_response(client_fd, DISCONNECTION_NOTICE, "Disconnected during password input.");
         close(client_fd);
         return;
     }
     password[nbytes - 1] = '\0';
+
+    // Authenticate user
     if (!authenticate_user(username, password)) {
-        write(client_fd, "Authentication failed.\n", 23);
+        send_response(client_fd, AUTHENTICATION_FAILED, NULL);
         log_event("Failed login attempt for user: %s\n", username);
         close(client_fd);
         return;
     }
-    write(client_fd, "Authentication successful.\n", 27);
+
+    send_response(client_fd, AUTHENTICATION_SUCCESS, NULL);
     log_event("User %s authenticated successfully.\n", username);
 
     int master_fd, slave_fd;
@@ -265,9 +271,11 @@ void handle_client(const int client_fd) {
     /* transmit data between master PTY and client */
     relay_data(master_fd, client_fd);
 
+    // Cleanup
     close(master_fd);
     kill(shell_pid, SIGKILL);
     waitpid(shell_pid, NULL, 0);
+    send_response(client_fd, DISCONNECTION_NOTICE, "Session ended.");
     close(client_fd);
 }
 
@@ -459,4 +467,44 @@ int authenticate_user(const char *username, const char *password) {
             }
     }
     return 0;
+}
+
+void send_response(int client_fd, ServerResponse response_code, const char *message) {
+    char buffer[BUFFER_SIZE];
+
+    // Map response code to a message if no custom message is provided
+    switch (response_code) {
+    case CONNECTION_SUCCESS:
+        snprintf(buffer, sizeof(buffer), LIGHT_GREEN"Connection successful.\n"RESET);
+        break;
+    case CONNECTION_FAILURE:
+        snprintf(buffer, sizeof(buffer), RED"Connection failed.\n"RESET);
+        break;
+    case AUTHENTICATION_FAILED:
+        snprintf(buffer, sizeof(buffer), RED"Authentication failed.\n"RESET);
+        break;
+    case AUTHENTICATION_SUCCESS:
+        snprintf(buffer, sizeof(buffer), LIGHT_GREEN"Authentication successful.\n"RESET);
+        break;
+    case COMMAND_EXECUTION_ERROR:
+        snprintf(buffer, sizeof(buffer), RED"Error executing command.\n"RESET);
+        break;
+    case DISCONNECTION_NOTICE:
+        snprintf(buffer, sizeof(buffer), RED"Client disconnected.\n"RESET);
+        break;
+    default:
+        snprintf(buffer, sizeof(buffer), RED"Unknown response code.\n"RESET);
+        break;
+    }
+
+    // If a custom message is provided, append it
+    if (message != NULL) {
+        strncat(buffer, message, sizeof(buffer) - strlen(buffer) - 1);
+    }
+
+    // Send the response to the client
+    write(client_fd, buffer, strlen(buffer));
+
+    // Log the response
+    log_event("Sent to client_fd %d: %s", client_fd, buffer);
 }
