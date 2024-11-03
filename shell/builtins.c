@@ -13,6 +13,7 @@
 #include "builtins.h"
 #include "definitions.h"
 #include "terminal.h"
+#include "../protocol.h"
 
 /* System Includes */
 #include <stdio.h>
@@ -159,54 +160,52 @@ void error(const char *msg) {
 }
 
 void connect_to_server(char *hostname, const int port) {
-    // Create and connect the socket
-    const int socket = create_and_connect_socket(hostname, port);
-    if (socket == -1) {
+    int socket_fd = create_and_connect_socket(hostname, port);
+    if (socket_fd == -1) {
         fprintf(stderr, "Failed to establish connection to %s:%d\n", hostname, port);
         return;
     }
 
+    Message msg;
     char buffer[BUFFER_SIZE];
 
-    // Read and respond to authentication prompts
-    for (int i = 0; i < 2; ++i) {  // Expect two prompts (username and password)
-        int nbytes = read(socket, buffer, sizeof(buffer) - 1);
-        if (nbytes <= 0) {
-            close(socket);
-            return;
-        }
-        buffer[nbytes] = '\0';
-        printf("%s", buffer);  // Print the prompt from server (if you want)
-
-        // Get user input
+    // Handle username prompt
+    if (receive_message(socket_fd, &msg) > 0 && strstr(msg.content, "Username:")) {
+        printf("%s", msg.content);
         fgets(buffer, sizeof(buffer), stdin);
         buffer[strcspn(buffer, "\n")] = '\0';
-
-        // Send user input to server
-        dprintf(socket, "%s\n", buffer);
+        strncpy(msg.content, buffer, sizeof(msg.content) - 1);
+        msg.content_length = strlen(msg.content);
+        send_message(socket_fd, &msg);
     }
 
-    // Check server's response
-    int nbytes = read(socket, buffer, sizeof(buffer) - 1);
-    if (nbytes <= 0) {
-        close(socket);
-        return;
+    if (receive_message(socket_fd, &msg) > 0 && strstr(msg.content, "Password:")) {
+        printf("%s", msg.content);
+        fgets(buffer, sizeof(buffer), stdin);
+        buffer[strcspn(buffer, "\n")] = '\0';  // Remove newline character from input
+
+        // Log the password being sent (for debugging purposes only)
+        printf("Sending password: '%s'\n", buffer);
+
+        // Populate the message structure with the password
+        strncpy(msg.content, buffer, sizeof(msg.content) - 1);
+        msg.content[sizeof(msg.content) - 1] = '\0';
+        msg.content_length = strlen(msg.content);
+
+        // Send the password message to the server
+        send_message(socket_fd, &msg);
     }
-    buffer[nbytes] = '\0';
-    printf("%s", buffer);
 
-    // If authentication fails, close connection
-    if (strstr(buffer, "Authentication successful") == NULL) {
-        close(socket);
-        return;
+    // Authentication response
+    if (receive_message(socket_fd, &msg) > 0) {
+        printf("%s", msg.content);
+        if (msg.status_code != AUTH_SUCCESS) {
+            close(socket_fd);
+            return;
+        }
     }
 
-    printf("Connected to %s:%d\n", hostname, port);
-    printf("Type your commands below. Press Ctrl+D to disconnect.\n");
-
-    // transmit data
-    relay_data(socket);
-
+    relay_data(socket_fd);
     printf("Connection closed.\n");
 }
 

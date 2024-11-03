@@ -7,6 +7,7 @@
  */
 
 #include "server.h"
+#include "../protocol.h"
 
 #include <pty.h>
 #include <termios.h>
@@ -153,39 +154,48 @@ void handle_client(const int client_fd) {
         return;
     }
 
+
+    Message msg;
     char username[MAX_USERNAME_LENGTH];
     char password[MAX_PASSWORD_LENGTH];
-    int nbytes;
 
-    // Prompt for username and receive input
-    write(client_fd, "Username: ", 10);
-    nbytes = read(client_fd, username, MAX_USERNAME_LENGTH - 1);
-    if (nbytes <= 0) {
-        send_response(client_fd, DISCONNECTION_NOTICE, "Disconnected during username input.");
+    // Prompt for username
+    send_response(client_fd, RESPONSE_OK, "Username:");
+    if (receive_message(client_fd, &msg) <= 0) {
+        send_response(client_fd, RESPONSE_FAIL, "Disconnected during username input.");
         close(client_fd);
         return;
     }
-    username[nbytes - 1] = '\0';
+    strncpy(username, msg.content, MAX_USERNAME_LENGTH - 1);
+    username[MAX_USERNAME_LENGTH - 1] = '\0';
+    username[strcspn(username, "\r\n")] = '\0';  // Remove trailing newline or spaces
 
-    // Prompt for password and receive input
-    write(client_fd, "Password: ", 10);
-    nbytes = read(client_fd, password, MAX_PASSWORD_LENGTH - 1);
-    if (nbytes <= 0) {
-        send_response(client_fd, DISCONNECTION_NOTICE, "Disconnected during password input.");
+    // Log received username
+    log_event("Received username: '%s'\n", username);
+
+    // Prompt for password
+    send_response(client_fd, RESPONSE_OK, "Password:");
+    if (receive_message(client_fd, &msg) <= 0) {
+        send_response(client_fd, RESPONSE_FAIL, "Disconnected during password input.");
         close(client_fd);
         return;
     }
-    password[nbytes - 1] = '\0';
+    strncpy(password, msg.content, MAX_PASSWORD_LENGTH - 1);
+    password[MAX_PASSWORD_LENGTH - 1] = '\0';
+    password[strcspn(password, "\r\n")] = '\0';  // Remove trailing newline or spaces
+
+    // Log received password
+    log_event("Received password: '%s'\n", password);
 
     // Authenticate user
     if (!authenticate_user(username, password)) {
-        send_response(client_fd, AUTHENTICATION_FAILED, NULL);
+        send_response(client_fd, AUTH_FAIL, "Authentication failed.");
         log_event("Failed login attempt for user: %s\n", username);
         close(client_fd);
         return;
     }
 
-    send_response(client_fd, AUTHENTICATION_SUCCESS, NULL);
+    send_response(client_fd, AUTH_SUCCESS, "Authentication successful.");
     log_event("User %s authenticated successfully.\n", username);
 
     int master_fd, slave_fd;
@@ -275,7 +285,7 @@ void handle_client(const int client_fd) {
     close(master_fd);
     kill(shell_pid, SIGKILL);
     waitpid(shell_pid, NULL, 0);
-    send_response(client_fd, DISCONNECTION_NOTICE, "Session ended.");
+    send_response(client_fd, RESPONSE_OK, "Session ended.");
     close(client_fd);
 }
 
@@ -463,48 +473,39 @@ int authenticate_user(const char *username, const char *password) {
     for (int i = 0; i < user_count; i++) {
         if (strcmp(users[i].username, username) == 0 &&
             strcmp(users[i].password, password) == 0) {
-            return 1;
+            return 1;  // Match found
             }
     }
-    return 0;
+    return 0;  // No match
 }
 
-void send_response(int client_fd, ServerResponse response_code, const char *message) {
-    char buffer[BUFFER_SIZE];
+void send_response(int client_fd, ResponseCode response_code, const char *message) {
+    Message msg;
+    msg.status_code = response_code;
 
-    // Map response code to a message if no custom message is provided
+    // Set default messages based on response code if no custom message is provided
+    const char *default_msg;
     switch (response_code) {
-    case CONNECTION_SUCCESS:
-        snprintf(buffer, sizeof(buffer), LIGHT_GREEN"Connection successful.\n"RESET);
-        break;
-    case CONNECTION_FAILURE:
-        snprintf(buffer, sizeof(buffer), RED"Connection failed.\n"RESET);
-        break;
-    case AUTHENTICATION_FAILED:
-        snprintf(buffer, sizeof(buffer), RED"Authentication failed.\n"RESET);
-        break;
-    case AUTHENTICATION_SUCCESS:
-        snprintf(buffer, sizeof(buffer), LIGHT_GREEN"Authentication successful.\n"RESET);
-        break;
-    case COMMAND_EXECUTION_ERROR:
-        snprintf(buffer, sizeof(buffer), RED"Error executing command.\n"RESET);
-        break;
-    case DISCONNECTION_NOTICE:
-        snprintf(buffer, sizeof(buffer), RED"Client disconnected.\n"RESET);
-        break;
-    default:
-        snprintf(buffer, sizeof(buffer), RED"Unknown response code.\n"RESET);
-        break;
+    case CONNECTION_SUCCESS: default_msg = "Connection successful.\n"; break;
+    case CONNECTION_FAILURE: default_msg = "Connection failed.\n"; break;
+    case AUTH_SUCCESS: default_msg = "Authentication successful.\n"; break;
+    case AUTH_FAIL: default_msg = "Authentication failed.\n"; break;
+    case COMMAND_SUCCESS: default_msg = "Command executed successfully.\n"; break;
+    case COMMAND_FAIL: default_msg = "Command execution failed.\n"; break;
+    case RESPONSE_OK: default_msg = "Operation completed successfully.\n"; break;
+    case RESPONSE_FAIL: default_msg = "Operation failed.\n"; break;
+    default: default_msg = "Unknown response code.\n"; break;
     }
 
-    // If a custom message is provided, append it
-    if (message != NULL) {
-        strncat(buffer, message, sizeof(buffer) - strlen(buffer) - 1);
+    // Use provided message or default
+    strncpy(msg.content, message ? message : default_msg, sizeof(msg.content) - 1);
+    msg.content[sizeof(msg.content) - 1] = '\0';
+    msg.content_length = strlen(msg.content);
+
+    // Send the structured message to the client
+    if (send_message(client_fd, &msg) < 0) {
+        log_event("Failed to send response to client_fd %d\n", client_fd);
+    } else {
+        log_event("Sent to client_fd %d: %s", client_fd, msg.content);
     }
-
-    // Send the response to the client
-    write(client_fd, buffer, strlen(buffer));
-
-    // Log the response
-    log_event("Sent to client_fd %d: %s", client_fd, buffer);
 }
