@@ -1,0 +1,1 @@
+/usr/bin/cc -g CMakeFiles/server.dir/server.c.o CMakeFiles/server.dir/mnt/f/DockerFiles/ICT374-A2/protocol.c.o -o server 

@@ -1,0 +1,10 @@
+    370 pts/0    Ss     0:00 -bash
+    422 pts/1    S+     0:00 -bash
+    501 pts/2    Ss     0:00 -bash
+    880 pts/0    S+     0:00 ./egg_shell
+    996 pts/2    S+     0:00 ./server
+   1046 pts/2    S+     0:00 ./server
+   1047 pts/3    Ss+    0:00 egg_shell
+   1828 pts/4    Ss+    0:00 ./fsnotifier-wsl
+   1851 pts/5    Ssl+   0:00 /tmp/tmp.HrqVCbuVcO/ijent grpc-stdio-server --log-level info --self-delete-on-exit
+  49274 pts/3    R+     0:00 ps -h

@@ -1,0 +1,3 @@
+/mnt/f/DockerFiles/ICT374-A2/shell/cmake-build-debug/CMakeFiles/egg_shell.dir
+/mnt/f/DockerFiles/ICT374-A2/shell/cmake-build-debug/CMakeFiles/edit_cache.dir
+/mnt/f/DockerFiles/ICT374-A2/shell/cmake-build-debug/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,4 @@
+  PID TTY          TIME CMD
+29164 pts/7    00:00:00 egg_shell
+29829 pts/7    00:00:00 ps
+98363 pts/7    00:00:00 bash

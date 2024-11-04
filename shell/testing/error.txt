@@ -1,0 +1,2 @@
+find: paths must precede expression: `output.txt'
+find: possible unquoted pattern after predicate `-name'?
