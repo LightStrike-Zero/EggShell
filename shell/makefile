@@ -24,14 +24,14 @@ token.o: token.c token.h definitions.h
 history.o: history.c history.h definitions.h
 	$(CC) $(CFLAGS) -c history.c
 
-builtins.o: builtins.c builtins.h definitions.h ../protocol.h
+builtins.o: builtins.c builtins.h definitions.h ../server/protocol.h
 	$(CC) $(CFLAGS) -c builtins.c
 
 terminal.o: terminal.c terminal.h definitions.h
 	$(CC) $(CFLAGS) -c terminal.c
 
-protocol.o: ../protocol.c ../protocol.h
-	$(CC) $(CFLAGS) -c ../protocol.c
+protocol.o: protocol.c protocol.h
+	$(CC) $(CFLAGS) -c protocol.c
 
 clean:
 	rm -f $(TARGET) *.o

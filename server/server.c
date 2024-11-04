@@ -7,7 +7,7 @@
  */
 
 #include "server.h"
-#include "../protocol.h"
+#include "protocol.h"
 
 #include <pty.h>
 #include <termios.h>

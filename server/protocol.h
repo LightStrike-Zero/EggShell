@@ -1,6 +1,11 @@
-//
-// Created by Shaun on 3/11/2024.
-//
+/**
+* @file protocol.h
+ * @brief Definition of the protocol
+ *
+ *
+ * @author Shaun Matthews & Louise Barjaktarevic
+ * @date 30/10/24
+ */
 
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
@@ -21,13 +26,12 @@ typedef enum {
 
 // Message structure for encapsulating message details
 typedef struct {
-    ResponseCode status_code;   // Status code indicating success, failure, etc.
+    ResponseCode status_code;   // Status code indicating success or
     uint16_t content_length;    // Length of the message content
-    char content[512];          // Message content (up to 512 bytes for simplicity)
+    char content[512];          // Message content
 } Message;
 
 
-// Function prototypes for encoding, decoding, sending, and receiving messages
 int send_message(int client_fd, const Message *msg);
 int receive_message(int socket_fd, Message *msg);
 
