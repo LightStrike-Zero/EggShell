@@ -63,19 +63,19 @@ int main(int argc, char *argv[]) {
 
     /* accept and handle incoming connections */
     while (1) {
-        struct sockaddr_in client_addr;
-        socklen_t sin_size = sizeof(client_addr);
-        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &sin_size);
+        struct sockaddr_in client_address;
+        socklen_t sin_size = sizeof(client_address);
+        const int client_fd = accept(server_fd, (struct sockaddr *)&client_address, &sin_size);
         if (client_fd == -1) {
             perror("accept");
             continue;
         }
 
         log_event("Received connection from %s:%d.\n",
-          inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+          inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
 
         /* child process handle the client */
-        pid_t pid = fork();
+        const pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
             close(client_fd);
@@ -105,7 +105,7 @@ int main(int argc, char *argv[]) {
  * @param port Port number to bind the server to.
  */
 void setup_server(int *server_fd, const int port) {
-    struct sockaddr_in server_addr;
+    struct sockaddr_in server_address;
     const int yes = 1;
 
     /* Create a TCP socket */
@@ -122,12 +122,12 @@ void setup_server(int *server_fd, const int port) {
     }
 
     /* bind the socket to the port */
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(port);
-    memset(&(server_addr.sin_zero), '\0', 8);
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(port);
+    memset(&(server_address.sin_zero), '\0', 8);
 
-    if (bind(*server_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
+    if (bind(*server_fd, (struct sockaddr *)&server_address, sizeof(struct sockaddr)) == -1) {
         perror("bind");
         close(*server_fd);
         exit(EXIT_FAILURE);
